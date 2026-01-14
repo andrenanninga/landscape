@@ -8,15 +8,21 @@ signal data_changed
 enum Corner { NW = 0, NE = 1, SE = 2, SW = 3 }
 
 # Grid configuration
+var _skip_resize: bool = false
+
 @export var grid_width: int = 8:
 	set(value):
+		var old_width := grid_width
 		grid_width = maxi(1, value)
-		_resize_grid()
+		if not _skip_resize:
+			_resize_grid(old_width, grid_depth)
 
 @export var grid_depth: int = 8:
 	set(value):
+		var old_depth := grid_depth
 		grid_depth = maxi(1, value)
-		_resize_grid()
+		if not _skip_resize:
+			_resize_grid(grid_width, old_depth)
 
 @export var cell_size: float = 1.0:
 	set(value):
@@ -45,23 +51,41 @@ const TEXTURE_OFFSET := 8
 
 
 func _init() -> void:
-	_resize_grid()
+	_resize_grid(0, 0)
 
 
-func _resize_grid() -> void:
+# Restore full grid state (used for undo/redo)
+func restore_grid_state(width: int, depth: int, cell_data: PackedInt32Array) -> void:
+	_skip_resize = true
+	grid_width = width
+	grid_depth = depth
+	_skip_resize = false
+	cells = cell_data
+	data_changed.emit()
+
+
+func _resize_grid(old_width: int, old_depth: int) -> void:
 	var new_size := grid_width * grid_depth * CELL_DATA_SIZE
-	if cells.size() != new_size:
-		var old_cells := cells.duplicate()
-		var old_width := 0
-		var old_depth := 0
-		if old_cells.size() > 0:
-			# Try to preserve old dimensions - approximate
-			old_width = grid_width
-			old_depth = old_cells.size() / CELL_DATA_SIZE / maxi(1, old_width)
+	if cells.size() == new_size:
+		return
 
-		cells.resize(new_size)
-		cells.fill(0)
-		data_changed.emit()
+	var old_cells := cells.duplicate()
+	cells.resize(new_size)
+	cells.fill(0)
+
+	# Copy overlapping data from old grid to new grid
+	if old_cells.size() > 0 and old_width > 0 and old_depth > 0:
+		var copy_width := mini(old_width, grid_width)
+		var copy_depth := mini(old_depth, grid_depth)
+
+		for z in copy_depth:
+			for x in copy_width:
+				var old_idx := (z * old_width + x) * CELL_DATA_SIZE
+				var new_idx := (z * grid_width + x) * CELL_DATA_SIZE
+				for i in CELL_DATA_SIZE:
+					cells[new_idx + i] = old_cells[old_idx + i]
+
+	data_changed.emit()
 
 
 func _cell_index(x: int, z: int) -> int:

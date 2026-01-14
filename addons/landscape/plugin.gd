@@ -4,10 +4,12 @@ extends EditorPlugin
 const LandscapeTerrainScript = preload("res://addons/landscape/nodes/landscape.gd")
 const TerrainEditorScript = preload("res://addons/landscape/editor/terrain_editor.gd")
 const TerrainDockScene = preload("res://addons/landscape/editor/terrain_dock.tscn")
+const TerrainInspectorPluginScript = preload("res://addons/landscape/editor/terrain_inspector_plugin.gd")
 
 var _dock: Control
 var _terrain_editor: RefCounted  # TerrainEditor
 var _current_terrain: LandscapeTerrain
+var _inspector_plugin: EditorInspectorPlugin
 
 
 func _enter_tree() -> void:
@@ -25,6 +27,11 @@ func _enter_tree() -> void:
 	_terrain_editor.undo_redo = get_undo_redo()
 	_terrain_editor.hover_changed.connect(_on_hover_changed)
 
+	# Create inspector plugin for grid resize undo/redo
+	_inspector_plugin = TerrainInspectorPluginScript.new()
+	_inspector_plugin.undo_redo = get_undo_redo()
+	add_inspector_plugin(_inspector_plugin)
+
 	# Create dock
 	if ResourceLoader.exists("res://addons/landscape/editor/terrain_dock.tscn"):
 		_dock = TerrainDockScene.instantiate()
@@ -35,6 +42,10 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
 	remove_custom_type("LandscapeTerrain")
+
+	if _inspector_plugin:
+		remove_inspector_plugin(_inspector_plugin)
+		_inspector_plugin = null
 
 	if _dock:
 		remove_control_from_docks(_dock)
