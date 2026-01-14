@@ -13,6 +13,8 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Drag-based sculpting** - click and drag to raise/lower terrain with camera-aware height tracking
 - **Smart corner detection** - automatically detects cell vs corner mode based on cursor position
 - **Paint tool** - paint tiles on any surface (top, north, south, east, west) with rotation/flip
+- **Flip diagonal tool** - toggle triangle diagonal direction for saddle-shaped terrain
+- **Adjustable brush size** - 1x1 to 9x9 brush for sculpt, paint, and flip tools
 - **Visual feedback** - overlay-based selection highlight and sidebar status display
 
 ## Architecture
@@ -123,7 +125,8 @@ Generates ArrayMesh from TerrainData using SurfaceTool:
 
 ### TerrainEditor (RefCounted)
 Editor tool coordination:
-- Tools: SCULPT, PAINT
+- Tools: SCULPT, PAINT, FLIP_DIAGONAL
+- **Brush size**: Adjustable 1x1 to 9x9 (including even sizes), affects all tools
 - **Drag-based sculpting**: Click and drag to raise/lower terrain
 - **Smart corner detection**: Automatically switches between cell mode (center) and corner mode (near corners)
 - **Camera-aware**: Height follows mouse position accounting for camera perspective
@@ -175,7 +178,15 @@ PBR shader with atlas-based tile texturing:
    - Use rotation buttons (↺ ↻) to rotate the tile
    - Use flip buttons (⇆ ⇅) to flip horizontally/vertically
    - Status bar shows which surface is being hovered
-6. View cell info in the sidebar dock (updates on hover and drag)
+6. Use the **Flip** tool:
+   - Click a cell to toggle its diagonal triangulation
+   - Useful for saddle-shaped cells where opposite corners are at different heights
+   - Orange line shows current diagonal direction
+7. Adjust **Brush Size**:
+   - Use the slider below the tool buttons (1-9)
+   - Affects Sculpt, Paint, and Flip tools
+   - Larger brushes edit multiple cells at once
+8. View cell info in the sidebar dock (updates on hover and drag)
 
 ## Current Status
 
@@ -197,10 +208,11 @@ PBR shader with atlas-based tile texturing:
 - [x] Undo/redo support
 - [x] Collision generation
 - [x] Terrain parameters exposed directly on LandscapeTerrain node
+- [x] Brush size (1x1 to 9x9) for all tools
+- [x] Flip diagonal tool for controlling cell triangulation
 
 ### Not Yet Implemented
 - [ ] Floor editing tools
-- [ ] Brush size options
 - [ ] Multi-cell selection
 - [ ] Import/export terrain data
 - [ ] LOD for large terrains

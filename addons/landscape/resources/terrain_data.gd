@@ -63,6 +63,7 @@ const TILE_ROTATION_MASK := 0x300    # Bits 8-9: rotation (0-3)
 const TILE_ROTATION_SHIFT := 8
 const TILE_FLIP_H_BIT := 0x400       # Bit 10: flip horizontal
 const TILE_FLIP_V_BIT := 0x800       # Bit 11: flip vertical
+const DIAGONAL_FLIP_BIT := 0x1000    # Bit 12: flip diagonal (stored in top tile only)
 
 
 func _init() -> void:
@@ -239,6 +240,32 @@ func get_tile_flip_v(x: int, z: int, surface: Surface) -> bool:
 
 func set_tile(x: int, z: int, surface: Surface, tile_index: int, rotation: Rotation = Rotation.ROT_0, flip_h: bool = false, flip_v: bool = false) -> void:
 	set_tile_packed(x, z, surface, pack_tile(tile_index, rotation, flip_h, flip_v))
+
+
+# Diagonal flip accessors (stored in top tile's bit 12)
+func get_diagonal_flip(x: int, z: int) -> bool:
+	if not is_valid_cell(x, z):
+		return false
+	return (cells[_cell_index(x, z) + TILE_OFFSET] & DIAGONAL_FLIP_BIT) != 0
+
+
+func set_diagonal_flip(x: int, z: int, flip: bool) -> void:
+	if not is_valid_cell(x, z):
+		return
+	var idx := _cell_index(x, z) + TILE_OFFSET
+	var old_value := cells[idx]
+	var new_value: int
+	if flip:
+		new_value = old_value | DIAGONAL_FLIP_BIT
+	else:
+		new_value = old_value & ~DIAGONAL_FLIP_BIT
+	if old_value != new_value:
+		cells[idx] = new_value
+		data_changed.emit()
+
+
+func toggle_diagonal_flip(x: int, z: int) -> void:
+	set_diagonal_flip(x, z, not get_diagonal_flip(x, z))
 
 
 # Get all 5 tile values for a cell (packed)

@@ -2,13 +2,14 @@
 class_name TerrainEditor
 extends RefCounted
 
-enum Tool { NONE, SCULPT, PAINT }
+enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL }
 enum HoverMode { CELL, CORNER }
 
 signal tool_changed(new_tool: Tool)
 signal hover_changed(cell: Vector2i, corner: int, mode: int)
 signal height_changed(height: float, corner: int, mode: int)
 signal paint_state_changed()
+signal brush_size_changed(new_size: int)
 
 var editor_interface: EditorInterface
 var undo_redo: EditorUndoRedoManager
@@ -46,6 +47,12 @@ var current_paint_flip_v: bool = false:
 		current_paint_flip_v = value
 		paint_state_changed.emit()
 
+# Brush size (1 = 1x1, 2 = 2x2, 3 = 3x3, etc.)
+var brush_size: int = 1:
+	set(value):
+		brush_size = clampi(value, 1, 9)
+		brush_size_changed.emit(brush_size)
+
 # Corner detection threshold - distance from corner as fraction of cell size
 const CORNER_THRESHOLD := 0.45
 
@@ -65,11 +72,14 @@ var _drag_original_corners: Array[int] = []
 var _drag_current_delta: int = 0
 var _drag_start_mouse_y: float = 0.0
 var _drag_world_pos: Vector3 = Vector3.ZERO  # World position of drag point for scale calculation
+var _drag_brush_cells: Array[Vector2i] = []  # All cells in brush area during drag
+var _drag_brush_original_corners: Dictionary = {}  # Original corners for each cell in brush: "x,z" -> Array[int]
 
 # Paint drag state
 var _is_paint_dragging: bool = false
 var _last_painted_cell: Vector2i = Vector2i(-1, -1)
 var _last_painted_surface: TerrainData.Surface = TerrainData.Surface.TOP
+var _painted_cells_this_drag: Dictionary = {}  # Tracks cells painted during current drag
 
 
 func set_terrain(terrain: LandscapeTerrain) -> void:
@@ -168,12 +178,18 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 
 	# Handle paint tool
 	if current_tool == Tool.PAINT:
-		var painted := _paint_cell(data, _hovered_cell.x, _hovered_cell.y, _hovered_surface)
+		_painted_cells_this_drag.clear()
+		var painted := _paint_brush_area(data, _hovered_cell, _hovered_surface)
 		if painted:
 			_is_paint_dragging = true
 			_last_painted_cell = _hovered_cell
 			_last_painted_surface = _hovered_surface
 		return painted
+
+	# Handle flip diagonal tool
+	if current_tool == Tool.FLIP_DIAGONAL:
+		_flip_diagonal_brush_area(data, _hovered_cell)
+		return true
 
 	if current_tool != Tool.SCULPT:
 		return false
@@ -181,15 +197,28 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 	_is_dragging = true
 	_drag_cell = _hovered_cell
 	_drag_corner = _hovered_corner
-	_drag_mode = _hover_mode
 	_drag_current_delta = 0
 	_drag_start_mouse_y = mouse_pos.y
 
-	# Store original heights
+	# For brush size > 1, force cell mode (corner mode doesn't make sense for multi-cell)
+	if brush_size > 1:
+		_drag_mode = HoverMode.CELL
+	else:
+		_drag_mode = _hover_mode
+
+	# Store original heights for center cell
 	_drag_original_corners = []
 	var corners := data.get_top_corners(_drag_cell.x, _drag_cell.y)
 	for c in corners:
 		_drag_original_corners.append(c)
+
+	# Store original heights for all brush cells
+	_drag_brush_cells = get_brush_cells(_drag_cell, data)
+	_drag_brush_original_corners.clear()
+	for cell in _drag_brush_cells:
+		var key := "%d,%d" % [cell.x, cell.y]
+		var cell_corners := data.get_top_corners(cell.x, cell.y)
+		_drag_brush_original_corners[key] = cell_corners.duplicate()
 
 	# Calculate world position for scale reference
 	var cell_size := data.cell_size
@@ -255,20 +284,26 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 
 	# Apply the new heights directly (no undo yet)
 	if _drag_mode == HoverMode.CORNER:
+		# Single corner mode (only for brush_size == 0)
 		var corner_target := _drag_original_corners[_drag_corner] + _drag_current_delta
 		var new_corners := _calculate_dragged_corners(_drag_corner, corner_target, data.max_slope_steps)
 		data.set_top_corners(_drag_cell.x, _drag_cell.y, new_corners)
 		var world_height := data.steps_to_world(new_corners[_drag_corner])
 		height_changed.emit(world_height, _drag_corner, _drag_mode)
 	else:
-		# Raise/lower all corners
-		var new_corners: Array[int] = []
-		for i in 4:
-			new_corners.append(_drag_original_corners[i] + _drag_current_delta)
-		data.set_top_corners(_drag_cell.x, _drag_cell.y, new_corners)
+		# Cell mode - raise/lower all corners of all brush cells
+		for cell in _drag_brush_cells:
+			var key := "%d,%d" % [cell.x, cell.y]
+			var original: Array = _drag_brush_original_corners[key]
+			var new_corners: Array[int] = []
+			for i in 4:
+				new_corners.append(original[i] + _drag_current_delta)
+			data.set_top_corners(cell.x, cell.y, new_corners)
+
+		# Report height for center cell
 		var avg_height := 0.0
-		for c in new_corners:
-			avg_height += data.steps_to_world(c)
+		for c in _drag_original_corners:
+			avg_height += data.steps_to_world(c + _drag_current_delta)
 		avg_height /= 4.0
 		height_changed.emit(avg_height, -1, _drag_mode)
 
@@ -325,11 +360,18 @@ func _finish_drag() -> void:
 		return
 
 	# Create undo/redo action for the final change
-	var final_corners := data.get_top_corners(_drag_cell.x, _drag_cell.y)
-
 	undo_redo.create_action("Sculpt Terrain")
-	undo_redo.add_do_method(data, "set_top_corners", _drag_cell.x, _drag_cell.y, final_corners)
-	undo_redo.add_undo_method(data, "set_top_corners", _drag_cell.x, _drag_cell.y, _drag_original_corners)
+
+	for cell in _drag_brush_cells:
+		var key := "%d,%d" % [cell.x, cell.y]
+		var original: Array = _drag_brush_original_corners[key]
+		var final_corners := data.get_top_corners(cell.x, cell.y)
+		var original_typed: Array[int] = []
+		for c in original:
+			original_typed.append(c)
+		undo_redo.add_do_method(data, "set_top_corners", cell.x, cell.y, final_corners)
+		undo_redo.add_undo_method(data, "set_top_corners", cell.x, cell.y, original_typed)
+
 	undo_redo.commit_action(false)  # Don't execute, already applied
 
 	_is_dragging = false
@@ -341,9 +383,16 @@ func _cancel_drag() -> void:
 		return
 
 	var data := _terrain.terrain_data
-	if data and _drag_cell.x >= 0:
-		# Restore original heights
-		data.set_top_corners(_drag_cell.x, _drag_cell.y, _drag_original_corners)
+	if data:
+		# Restore original heights for all brush cells
+		for cell in _drag_brush_cells:
+			var key := "%d,%d" % [cell.x, cell.y]
+			if _drag_brush_original_corners.has(key):
+				var original: Array = _drag_brush_original_corners[key]
+				var original_typed: Array[int] = []
+				for c in original:
+					original_typed.append(c)
+				data.set_top_corners(cell.x, cell.y, original_typed)
 
 	_is_dragging = false
 
@@ -366,7 +415,7 @@ func _update_paint_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 	if _hovered_cell == _last_painted_cell and _hovered_surface == _last_painted_surface:
 		return
 
-	_paint_cell(data, _hovered_cell.x, _hovered_cell.y, _hovered_surface)
+	_paint_brush_area(data, _hovered_cell, _hovered_surface)
 	_last_painted_cell = _hovered_cell
 	_last_painted_surface = _hovered_surface
 
@@ -506,6 +555,56 @@ func _raycast_terrain(origin: Vector3, direction: Vector3) -> Dictionary:
 	return {}
 
 
+func _flip_diagonal_brush_area(data: TerrainData, center: Vector2i) -> void:
+	var brush_cells := get_brush_cells(center, data)
+
+	if brush_cells.is_empty():
+		return
+
+	# Create single undo action for all cells
+	undo_redo.create_action("Flip Diagonal")
+	for cell in brush_cells:
+		var old_flip := data.get_diagonal_flip(cell.x, cell.y)
+		var new_flip := not old_flip
+		undo_redo.add_do_method(data, "set_diagonal_flip", cell.x, cell.y, new_flip)
+		undo_redo.add_undo_method(data, "set_diagonal_flip", cell.x, cell.y, old_flip)
+	undo_redo.commit_action()
+
+
+func _paint_brush_area(data: TerrainData, center: Vector2i, surface: TerrainData.Surface) -> bool:
+	var brush_cells := get_brush_cells(center, data)
+	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
+
+	# Collect cells that need to be painted (not already painted this drag, and different value)
+	var cells_to_paint: Array[Dictionary] = []
+	for cell in brush_cells:
+		var key := "%d,%d,%d" % [cell.x, cell.y, surface]
+		if _painted_cells_this_drag.has(key):
+			continue
+
+		var old_packed := data.get_tile_packed(cell.x, cell.y, surface)
+		if old_packed != new_packed:
+			cells_to_paint.append({
+				"x": cell.x,
+				"z": cell.y,
+				"old": old_packed,
+				"new": new_packed
+			})
+		_painted_cells_this_drag[key] = true
+
+	if cells_to_paint.is_empty():
+		return brush_cells.size() > 0  # Return true if we have valid brush area
+
+	# Create single undo action for all cells
+	undo_redo.create_action("Paint Terrain Tiles")
+	for cell_data in cells_to_paint:
+		undo_redo.add_do_method(data, "set_tile_packed", cell_data.x, cell_data.z, surface, cell_data.new)
+		undo_redo.add_undo_method(data, "set_tile_packed", cell_data.x, cell_data.z, surface, cell_data.old)
+	undo_redo.commit_action()
+
+	return true
+
+
 func _paint_cell(data: TerrainData, x: int, z: int, surface: TerrainData.Surface) -> bool:
 	var old_packed := data.get_tile_packed(x, z, surface)
 	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
@@ -538,6 +637,25 @@ func toggle_paint_flip_v() -> void:
 	current_paint_flip_v = not current_paint_flip_v
 
 
+# Get all cells within the brush area centered on the given cell
+func get_brush_cells(center: Vector2i, data: TerrainData) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+
+	# Calculate offset range based on brush size
+	# Odd sizes (1,3,5,7,9): centered, e.g. size 3 = -1 to +1
+	# Even sizes (2,4,6,8): offset toward negative, e.g. size 2 = -1 to 0, size 4 = -2 to +1
+	var half := brush_size / 2
+	var start := -half
+	var end := brush_size - half - 1
+
+	for dz in range(start, end + 1):
+		for dx in range(start, end + 1):
+			var cell := Vector2i(center.x + dx, center.y + dz)
+			if data.is_valid_cell(cell.x, cell.y):
+				cells.append(cell)
+	return cells
+
+
 func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 	if _hovered_cell.x < 0 or not terrain or current_tool == Tool.NONE:
 		return
@@ -554,23 +672,39 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 	if display_cell.x < 0:
 		return
 
-	# Paint tool: highlight the specific surface face
+	# Get all cells in brush area for display
+	var brush_cells := _drag_brush_cells if _is_dragging else get_brush_cells(display_cell, data)
+
+	# Paint tool: highlight the specific surface face for all brush cells
 	if current_tool == Tool.PAINT:
-		_draw_surface_highlight(overlay, camera, terrain, data, display_cell, _hovered_surface)
+		for cell in brush_cells:
+			_draw_surface_highlight(overlay, camera, terrain, data, cell, _hovered_surface)
+		return
+
+	# Flip diagonal tool: highlight top surface and show current diagonal
+	if current_tool == Tool.FLIP_DIAGONAL:
+		for cell in brush_cells:
+			_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, Color.ORANGE)
+			_draw_diagonal_indicator(overlay, camera, terrain, data, cell)
 		return
 
 	# Sculpt tool: draw cell/corner highlight
 	var display_corner := _drag_corner if _is_dragging else _hovered_corner
 	var display_mode := _drag_mode if _is_dragging else _hover_mode
 
+	# For brush size > 1, force cell mode display
+	if brush_size > 1:
+		display_mode = HoverMode.CELL
+
 	var color := Color.YELLOW if not _is_dragging else Color.GREEN
 
 	if display_mode == HoverMode.CORNER and display_corner >= 0:
-		# Corner mode: highlight the specific corner area
+		# Corner mode: highlight the specific corner area (only for single cell)
 		_draw_corner_highlight(overlay, camera, terrain, data, display_cell, display_corner, color)
 	else:
-		# Cell mode: highlight the entire top surface
-		_draw_surface_highlight(overlay, camera, terrain, data, display_cell, TerrainData.Surface.TOP, color)
+		# Cell mode: highlight the entire top surface for all brush cells
+		for cell in brush_cells:
+			_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, color)
 
 
 func _draw_surface_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, surface: TerrainData.Surface, color: Color = Color.CYAN) -> void:
@@ -597,11 +731,54 @@ func _draw_surface_highlight(overlay: Control, camera: Camera3D, terrain: Landsc
 		var next := (i + 1) % 4
 		overlay.draw_line(screen_points[i], screen_points[next], outline_color, 3.0)
 
-	# Draw filled quad with transparency
+	# Draw filled quad as two triangles (more robust than draw_colored_polygon)
 	var fill_color := color
 	fill_color.a = 0.25
-	var points := PackedVector2Array(screen_points)
-	overlay.draw_colored_polygon(points, fill_color)
+	var tri1 := PackedVector2Array([screen_points[0], screen_points[1], screen_points[2]])
+	var tri2 := PackedVector2Array([screen_points[0], screen_points[2], screen_points[3]])
+	overlay.draw_colored_polygon(tri1, fill_color)
+	overlay.draw_colored_polygon(tri2, fill_color)
+
+
+func _draw_diagonal_indicator(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i) -> void:
+	# Get top corners in world space
+	var top_corners := data.get_top_world_corners(cell.x, cell.y)
+	var nw := top_corners[0]
+	var ne := top_corners[1]
+	var se := top_corners[2]
+	var sw := top_corners[3]
+
+	# Determine which diagonal is used (same logic as mesh builder)
+	var diag1_diff := absf(nw.y - se.y)
+	var diag2_diff := absf(ne.y - sw.y)
+	var use_nw_se := diag1_diff <= diag2_diff
+
+	# Apply flip flag
+	if data.get_diagonal_flip(cell.x, cell.y):
+		use_nw_se = not use_nw_se
+
+	# Get the two corners of the current diagonal
+	var corner1: Vector3
+	var corner2: Vector3
+	if use_nw_se:
+		corner1 = nw
+		corner2 = se
+	else:
+		corner1 = ne
+		corner2 = sw
+
+	# Transform to screen space
+	var world1 := terrain.to_global(corner1)
+	var world2 := terrain.to_global(corner2)
+
+	if camera.is_position_behind(world1) or camera.is_position_behind(world2):
+		return
+
+	var screen1 := camera.unproject_position(world1)
+	var screen2 := camera.unproject_position(world2)
+
+	# Draw the diagonal line
+	overlay.draw_line(screen1, screen2, Color.ORANGE, 3.0)
 
 
 func _draw_corner_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, corner: int, color: Color) -> void:
@@ -641,11 +818,13 @@ func _draw_corner_highlight(overlay: Control, camera: Camera3D, terrain: Landsca
 		var next := (i + 1) % 4
 		overlay.draw_line(screen_points[i], screen_points[next], outline_color, 3.0)
 
-	# Draw filled quad
+	# Draw filled quad as two triangles (more robust than draw_colored_polygon)
 	var fill_color := color
 	fill_color.a = 0.35
-	var points := PackedVector2Array(screen_points)
-	overlay.draw_colored_polygon(points, fill_color)
+	var tri1 := PackedVector2Array([screen_points[0], screen_points[1], screen_points[2]])
+	var tri2 := PackedVector2Array([screen_points[0], screen_points[2], screen_points[3]])
+	overlay.draw_colored_polygon(tri1, fill_color)
+	overlay.draw_colored_polygon(tri2, fill_color)
 
 	# Draw corner circle
 	overlay.draw_circle(screen_points[0], 6.0, color)

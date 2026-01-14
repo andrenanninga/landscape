@@ -47,6 +47,37 @@ toggle_mode = true
 text = "Paint"
 tooltip_text = "Click to paint tiles. Surface is auto-detected from click position."
 
+[node name="FlipDiagonalButton" type="Button" parent="VBoxContainer/TerrainTools"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+text = "Flip"
+tooltip_text = "Click to flip the diagonal triangulation of a cell. Useful for saddle-shaped cells."
+
+[node name="BrushSection" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="BrushLabel" type="Label" parent="VBoxContainer/BrushSection"]
+layout_mode = 2
+text = "Brush:"
+
+[node name="BrushSizeSlider" type="HSlider" parent="VBoxContainer/BrushSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 1.0
+max_value = 9.0
+step = 1.0
+value = 1.0
+tooltip_text = "Brush size (1 = 1x1, 2 = 2x2, 3 = 3x3, etc.)"
+
+[node name="BrushSizeLabel" type="Label" parent="VBoxContainer/BrushSection"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(24, 0)
+text = "1"
+horizontal_alignment = 2
+
 [node name="PaintSection" type="VBoxContainer" parent="VBoxContainer"]
 unique_name_in_owner = true
 visible = false

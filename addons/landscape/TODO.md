@@ -4,8 +4,7 @@
 
 ### High Priority
 1. **Floor editing** - Tools to raise/lower floor surfaces
-2. **Brush size** - Allow affecting multiple cells at once
-3. **Custom tile atlas import** - Load user-provided tile atlases
+2. **Custom tile atlas import** - Load user-provided tile atlases
 
 ### Medium Priority
 4. **Keyboard shortcuts** - Quick tool switching (1-6 keys)
@@ -21,6 +20,8 @@
 12. **Flatten tool** - Set region to specific height
 
 ## Recently Completed
+- [x] **Flip diagonal tool** - Toggle the diagonal triangulation of cells (useful for saddle-shaped terrain)
+- [x] **Brush size** - Slider to adjust brush size (1x1 to 9x9, including even sizes), affects sculpt and paint tools
 - [x] **Paint tool** - Click any surface to paint tiles (top, north, south, east, west)
 - [x] **Tile atlas system** - TerrainTileSet resource with atlas texture support
 - [x] **Tile transformations** - Rotation (0°/90°/180°/270°) and flip (H/V)
@@ -109,3 +110,20 @@
   - Rotation/flip controls
   - Surface selector dropdown
   - Status bar moved to bottom showing surface name
+
+### 2025-01-14 - Brush Size & Flip Diagonal Tool
+- Implemented adjustable brush size (1-9):
+  - Slider in dock UI below tool buttons
+  - Supports both odd (centered) and even (offset) sizes
+  - Affects Sculpt, Paint, and Flip Diagonal tools
+  - Single undo action for multi-cell operations
+  - Overlay highlights all cells in brush area
+- Implemented Flip Diagonal tool:
+  - New "Flip" button in toolbar
+  - Toggles triangle diagonal direction per cell
+  - Stored as bit flag in tile data (bit 12 of top tile)
+  - Mesh builder respects flip flag when triangulating
+  - Orange overlay shows current diagonal direction
+  - Useful for saddle-shaped terrain where auto-selection isn't ideal
+- Fixed overlay polygon drawing:
+  - Draw quads as two triangles to avoid triangulation errors at extreme camera angles

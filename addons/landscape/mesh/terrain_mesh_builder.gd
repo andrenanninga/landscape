@@ -62,7 +62,14 @@ func _add_top_face(corners: Array[Vector3], x: int, z: int) -> void:
 	var diag1_diff := absf(nw.y - se.y)
 	var diag2_diff := absf(ne.y - sw.y)
 
-	if diag1_diff <= diag2_diff:
+	# Default: use NW-SE diagonal when differences are equal or smaller
+	var use_nw_se_diagonal := diag1_diff <= diag2_diff
+
+	# Apply manual diagonal flip override
+	if _terrain_data.get_diagonal_flip(x, z):
+		use_nw_se_diagonal = not use_nw_se_diagonal
+
+	if use_nw_se_diagonal:
 		# NW-SE diagonal
 		_add_triangle(nw, ne, se, uv_nw, uv_ne, uv_se)
 		_add_triangle(nw, se, sw, uv_nw, uv_se, uv_sw)
@@ -89,7 +96,11 @@ func _add_floor_face(corners: Array[Vector3], x: int, z: int) -> void:
 	var diag1_diff := absf(nw.y - se.y)
 	var diag2_diff := absf(ne.y - sw.y)
 
-	if diag1_diff <= diag2_diff:
+	var use_nw_se_diagonal := diag1_diff <= diag2_diff
+	if _terrain_data.get_diagonal_flip(x, z):
+		use_nw_se_diagonal = not use_nw_se_diagonal
+
+	if use_nw_se_diagonal:
 		_add_triangle(nw, se, ne, uv_nw, uv_se, uv_ne)
 		_add_triangle(nw, sw, se, uv_nw, uv_sw, uv_se)
 	else:

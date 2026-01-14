@@ -82,8 +82,8 @@ func _forward_3d_gui_input(viewport_camera: Camera3D, event: InputEvent) -> int:
 
 	var handled: bool = _terrain_editor.handle_input(viewport_camera, event, _current_terrain)
 
-	# Always update overlays on mouse motion to ensure hover highlight is shown
-	if event is InputEventMouseMotion:
+	# Update overlays on mouse motion or when input was handled (e.g., after clicking)
+	if event is InputEventMouseMotion or handled:
 		update_overlays()
 
 	if handled:

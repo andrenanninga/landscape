@@ -11,6 +11,7 @@ var terrain_editor = null:
 			terrain_editor.hover_changed.connect(_on_hover_changed)
 			terrain_editor.height_changed.connect(_on_height_changed)
 			terrain_editor.paint_state_changed.connect(_on_paint_state_changed)
+			terrain_editor.brush_size_changed.connect(_on_brush_size_changed)
 
 var terrain = null:
 	set(value):
@@ -24,6 +25,8 @@ var _tile_buttons: Array[Button] = []
 
 @onready var _tool_buttons: Dictionary = {}
 @onready var _status_label: Label = %StatusLabel
+@onready var _brush_size_slider: HSlider = %BrushSizeSlider
+@onready var _brush_size_label: Label = %BrushSizeLabel
 @onready var _paint_section: VBoxContainer = %PaintSection
 @onready var _surface_selector: OptionButton = %SurfaceSelector
 @onready var _rotate_ccw_button: Button = %RotateCCWButton
@@ -37,6 +40,7 @@ var _tile_buttons: Array[Button] = []
 
 func _ready() -> void:
 	_setup_tool_buttons()
+	_setup_brush_controls()
 	_setup_paint_controls()
 	_update_button_states()
 
@@ -45,12 +49,38 @@ func _setup_tool_buttons() -> void:
 	_tool_buttons = {
 		TerrainEditor.Tool.SCULPT: %SculptButton,
 		TerrainEditor.Tool.PAINT: %PaintButton,
+		TerrainEditor.Tool.FLIP_DIAGONAL: %FlipDiagonalButton,
 	}
 
 	for tool_type in _tool_buttons:
 		var button: Button = _tool_buttons[tool_type]
 		if button:
 			button.pressed.connect(_on_tool_button_pressed.bind(tool_type))
+
+
+func _setup_brush_controls() -> void:
+	if _brush_size_slider:
+		_brush_size_slider.value_changed.connect(_on_brush_size_slider_changed)
+
+
+func _on_brush_size_slider_changed(value: float) -> void:
+	if terrain_editor:
+		terrain_editor.brush_size = int(value)
+
+
+func _on_brush_size_changed(new_size: int) -> void:
+	_update_brush_size_display()
+
+
+func _update_brush_size_display() -> void:
+	if not terrain_editor:
+		return
+
+	if _brush_size_slider:
+		_brush_size_slider.set_value_no_signal(terrain_editor.brush_size)
+
+	if _brush_size_label:
+		_brush_size_label.text = str(terrain_editor.brush_size)
 
 
 func _setup_paint_controls() -> void:

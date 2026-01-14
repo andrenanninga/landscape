@@ -125,8 +125,8 @@ int detect_surface(vec3 normal) {
 
 // Get local UV coordinates within a cell based on surface type
 vec2 get_surface_uv(vec3 pos, int surface) {
-	if (surface == 0) {
-		// Top surface - use XZ plane
+	if (surface == 0 || surface == -1) {
+		// Top/floor surface - use XZ plane
 		return fract(pos.xz / cell_size);
 	} else if (surface == 1 || surface == 3) {
 		// North/South walls - use XY plane
@@ -176,9 +176,8 @@ void fragment() {
 		flip_v = tile_info.w != 0;
 	}
 
-	// Get local UV within cell (use TOP UV for floor)
-	int uv_surface = surface >= 0 ? surface : 0;
-	vec2 local_uv = get_surface_uv(local_position, uv_surface);
+	// Get local UV within cell
+	vec2 local_uv = get_surface_uv(local_position, surface);
 
 	// Apply rotation and flip transformations
 	local_uv = transform_uv(local_uv, rotation, flip_h, flip_v);
