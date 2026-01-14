@@ -18,6 +18,15 @@ signal terrain_changed
 		texture_set = value
 		_update_material()
 
+@export var tile_set: TerrainTileSet:
+	set(value):
+		if tile_set and tile_set.tileset_changed.is_connected(_on_tileset_changed):
+			tile_set.tileset_changed.disconnect(_on_tileset_changed)
+		tile_set = value
+		if tile_set:
+			tile_set.tileset_changed.connect(_on_tileset_changed)
+		_update_material()
+
 @export var auto_rebuild: bool = true
 
 @export_group("Grid")
@@ -60,6 +69,7 @@ signal terrain_changed
 @export_group("")
 
 var _mesh_builder: TerrainMeshBuilder
+var _tile_data_texture: ImageTexture
 
 
 func _ready() -> void:
@@ -73,7 +83,13 @@ func _ready() -> void:
 func _on_data_changed() -> void:
 	if auto_rebuild:
 		rebuild_mesh()
+	_update_tile_data_texture()
+	_update_material()
 	terrain_changed.emit()
+
+
+func _on_tileset_changed() -> void:
+	_update_material()
 
 
 func rebuild_mesh() -> void:
@@ -97,8 +113,77 @@ func _update_collision() -> void:
 		create_trimesh_collision()
 
 
+func _update_tile_data_texture() -> void:
+	if not terrain_data or not tile_set:
+		_tile_data_texture = null
+		return
+
+	# Create RG8 image: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
+	# R channel = tile index (0-255)
+	# G channel = flags (bits 0-1: rotation, bit 2: flip_h, bit 3: flip_v)
+	var width := terrain_data.grid_width * 5
+	var height := terrain_data.grid_depth
+
+	var image := Image.create(width, height, false, Image.FORMAT_RG8)
+
+	for z in terrain_data.grid_depth:
+		for x in terrain_data.grid_width:
+			var tiles := terrain_data.get_all_tiles_packed(x, z)
+			for surface in 5:
+				var packed := tiles[surface]
+				var tile_index := packed & TerrainData.TILE_INDEX_MASK
+				var rotation := (packed & TerrainData.TILE_ROTATION_MASK) >> TerrainData.TILE_ROTATION_SHIFT
+				var flip_h := 1 if (packed & TerrainData.TILE_FLIP_H_BIT) != 0 else 0
+				var flip_v := 1 if (packed & TerrainData.TILE_FLIP_V_BIT) != 0 else 0
+
+				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v
+				var flags := rotation | (flip_h << 2) | (flip_v << 3)
+
+				var pixel_x := x * 5 + surface
+				# Store as normalized values (0-255 range mapped to 0-1)
+				image.set_pixel(pixel_x, z, Color(tile_index / 255.0, flags / 255.0, 0, 1))
+
+	_tile_data_texture = ImageTexture.create_from_image(image)
+
+
 func _update_material() -> void:
-	if texture_set:
+	# Tiled rendering takes priority if tile_set is assigned
+	if tile_set and tile_set.atlas_texture:
+		var shader: Shader = load("res://addons/landscape/shaders/terrain_tiled.gdshader")
+		if shader:
+			var mat := ShaderMaterial.new()
+			mat.shader = shader
+
+			# Set atlas texture
+			mat.set_shader_parameter("tile_atlas", tile_set.atlas_texture)
+			mat.set_shader_parameter("atlas_columns", tile_set.atlas_columns)
+			mat.set_shader_parameter("atlas_rows", tile_set.atlas_rows)
+
+			# Set normal map if available
+			if tile_set.normal_atlas:
+				mat.set_shader_parameter("tile_atlas_normal", tile_set.normal_atlas)
+				mat.set_shader_parameter("use_normal_map", true)
+			else:
+				mat.set_shader_parameter("use_normal_map", false)
+
+			# Set PBR properties
+			mat.set_shader_parameter("roughness", tile_set.roughness)
+			mat.set_shader_parameter("metallic", tile_set.metallic)
+
+			# Set grid info
+			if terrain_data:
+				mat.set_shader_parameter("grid_size", Vector2i(terrain_data.grid_width, terrain_data.grid_depth))
+				mat.set_shader_parameter("cell_size", terrain_data.cell_size)
+
+			# Set tile data texture
+			_update_tile_data_texture()
+			if _tile_data_texture:
+				mat.set_shader_parameter("tile_data", _tile_data_texture)
+
+			material_override = mat
+		else:
+			material_override = null
+	elif texture_set:
 		material_override = texture_set.create_material()
 	else:
 		# Apply default shader with solid colors

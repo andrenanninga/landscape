@@ -8,6 +8,7 @@ enum HoverMode { CELL, CORNER }
 signal tool_changed(new_tool: Tool)
 signal hover_changed(cell: Vector2i, corner: int, mode: int)
 signal height_changed(height: float, corner: int, mode: int)
+signal paint_state_changed()
 
 var editor_interface: EditorInterface
 var undo_redo: EditorUndoRedoManager
@@ -19,7 +20,31 @@ var current_tool: Tool = Tool.NONE:
 		if value == Tool.NONE:
 			_clear_hover()
 
-var current_texture: int = 0
+# Paint tool state
+var current_paint_tile: int = 0:
+	set(value):
+		current_paint_tile = value
+		paint_state_changed.emit()
+
+var current_paint_surface: TerrainData.Surface = TerrainData.Surface.TOP:
+	set(value):
+		current_paint_surface = value
+		paint_state_changed.emit()
+
+var current_paint_rotation: TerrainData.Rotation = TerrainData.Rotation.ROT_0:
+	set(value):
+		current_paint_rotation = value
+		paint_state_changed.emit()
+
+var current_paint_flip_h: bool = false:
+	set(value):
+		current_paint_flip_h = value
+		paint_state_changed.emit()
+
+var current_paint_flip_v: bool = false:
+	set(value):
+		current_paint_flip_v = value
+		paint_state_changed.emit()
 
 # Corner detection threshold - distance from corner as fraction of cell size
 const CORNER_THRESHOLD := 0.45
@@ -28,6 +53,8 @@ var _terrain: LandscapeTerrain
 var _hovered_cell: Vector2i = Vector2i(-1, -1)
 var _hovered_corner: int = -1
 var _hover_mode: HoverMode = HoverMode.CELL
+var _hovered_surface: TerrainData.Surface = TerrainData.Surface.TOP
+var _last_camera: Camera3D
 
 # Drag state
 var _is_dragging: bool = false
@@ -39,11 +66,20 @@ var _drag_current_delta: int = 0
 var _drag_start_mouse_y: float = 0.0
 var _drag_world_pos: Vector3 = Vector3.ZERO  # World position of drag point for scale calculation
 
+# Paint drag state
+var _is_paint_dragging: bool = false
+var _last_painted_cell: Vector2i = Vector2i(-1, -1)
+var _last_painted_surface: TerrainData.Surface = TerrainData.Surface.TOP
+
 
 func set_terrain(terrain: LandscapeTerrain) -> void:
 	_terrain = terrain
 	_clear_hover()
 	_cancel_drag()
+
+
+func get_hovered_surface() -> TerrainData.Surface:
+	return _hovered_surface
 
 
 func _clear_hover() -> void:
@@ -82,6 +118,7 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 		return false
 
 	_terrain = terrain
+	_last_camera = camera
 
 	if current_tool == Tool.NONE:
 		return false
@@ -90,6 +127,9 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 		var motion := event as InputEventMouseMotion
 		if _is_dragging:
 			_update_drag(camera, motion.position)
+			return true
+		elif _is_paint_dragging:
+			_update_paint_drag(camera, motion.position)
 			return true
 		else:
 			_update_hover(camera, motion.position)
@@ -104,9 +144,16 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 				if _is_dragging:
 					_finish_drag()
 					return true
-		elif mb.button_index == MOUSE_BUTTON_RIGHT and _is_dragging:
-			_cancel_drag()
-			return true
+				elif _is_paint_dragging:
+					_finish_paint_drag()
+					return true
+		elif mb.button_index == MOUSE_BUTTON_RIGHT:
+			if _is_dragging:
+				_cancel_drag()
+				return true
+			elif _is_paint_dragging:
+				_finish_paint_drag()
+				return true
 
 	return false
 
@@ -118,6 +165,15 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 	var data := _terrain.terrain_data
 	if not data:
 		return false
+
+	# Handle paint tool
+	if current_tool == Tool.PAINT:
+		var painted := _paint_cell(data, _hovered_cell.x, _hovered_cell.y, _hovered_surface)
+		if painted:
+			_is_paint_dragging = true
+			_last_painted_cell = _hovered_cell
+			_last_painted_surface = _hovered_surface
+		return painted
 
 	if current_tool != Tool.SCULPT:
 		return false
@@ -292,6 +348,34 @@ func _cancel_drag() -> void:
 	_is_dragging = false
 
 
+func _update_paint_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
+	if not _is_paint_dragging or not _terrain:
+		return
+
+	var data := _terrain.terrain_data
+	if not data:
+		return
+
+	# Update hover position (this also updates _hovered_surface)
+	_update_hover(camera, mouse_pos)
+
+	if _hovered_cell.x < 0:
+		return
+
+	# Only paint if cell or surface changed
+	if _hovered_cell == _last_painted_cell and _hovered_surface == _last_painted_surface:
+		return
+
+	_paint_cell(data, _hovered_cell.x, _hovered_cell.y, _hovered_surface)
+	_last_painted_cell = _hovered_cell
+	_last_painted_surface = _hovered_surface
+
+
+func _finish_paint_drag() -> void:
+	_is_paint_dragging = false
+	_last_painted_cell = Vector2i(-1, -1)
+
+
 func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 	if _is_dragging:
 		return
@@ -300,60 +384,105 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 	var ray_dir := camera.project_ray_normal(mouse_pos)
 
 	var hit := _raycast_terrain(ray_origin, ray_dir)
-	if hit:
-		var old_cell := _hovered_cell
-		var old_corner := _hovered_corner
-		var old_mode := _hover_mode
-
-		_hovered_cell = _terrain.world_to_cell(hit)
-
-		# Calculate position within cell to determine corner vs center
-		var local_pos := _terrain.to_local(hit)
-		var cell_size := _terrain.terrain_data.cell_size
-		var cell_local_x := local_pos.x - _hovered_cell.x * cell_size
-		var cell_local_z := local_pos.z - _hovered_cell.y * cell_size
-
-		# Normalize to 0-1 range within cell
-		var norm_x := cell_local_x / cell_size
-		var norm_z := cell_local_z / cell_size
-
-		# Check distance to each corner
-		var corner_dists: Array[float] = [
-			Vector2(norm_x, norm_z).length(),              # NW (0,0)
-			Vector2(norm_x - 1.0, norm_z).length(),        # NE (1,0)
-			Vector2(norm_x - 1.0, norm_z - 1.0).length(),  # SE (1,1)
-			Vector2(norm_x, norm_z - 1.0).length(),        # SW (0,1)
-		]
-
-		# Find closest corner
-		var min_dist := corner_dists[0]
-		var closest_corner := 0
-		for i in range(1, 4):
-			if corner_dists[i] < min_dist:
-				min_dist = corner_dists[i]
-				closest_corner = i
-
-		_hovered_corner = closest_corner
-
-		# Determine mode based on distance to corner
-		if min_dist < CORNER_THRESHOLD:
-			_hover_mode = HoverMode.CORNER
-		else:
-			_hover_mode = HoverMode.CELL
-
-		if old_cell != _hovered_cell or old_corner != _hovered_corner or old_mode != _hover_mode:
-			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
-	else:
+	if hit.is_empty():
 		if _hovered_cell.x >= 0:
 			_hovered_cell = Vector2i(-1, -1)
 			_hovered_corner = -1
 			_hover_mode = HoverMode.CELL
+			_hovered_surface = TerrainData.Surface.TOP
 			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
+		return
+
+	var hit_pos: Vector3 = hit.position
+	var hit_normal: Vector3 = hit.normal
+
+	var old_cell := _hovered_cell
+	var old_corner := _hovered_corner
+	var old_mode := _hover_mode
+	var old_surface := _hovered_surface
+
+	_hovered_surface = _surface_from_normal(hit_normal)
+
+	# For walls, adjust the cell based on which cell owns the wall
+	# The hit position might be on the boundary, so we offset slightly into the correct cell
+	var adjusted_pos := hit_pos
+	if _hovered_surface == TerrainData.Surface.SOUTH:
+		adjusted_pos.z -= 0.01
+	elif _hovered_surface == TerrainData.Surface.EAST:
+		adjusted_pos.x -= 0.01
+	elif _hovered_surface == TerrainData.Surface.NORTH:
+		adjusted_pos.z += 0.01
+	elif _hovered_surface == TerrainData.Surface.WEST:
+		adjusted_pos.x += 0.01
+
+	_hovered_cell = _terrain.world_to_cell(adjusted_pos)
+
+	# For paint tool, we don't need corner detection
+	if current_tool == Tool.PAINT:
+		_hovered_corner = -1
+		_hover_mode = HoverMode.CELL
+		if old_cell != _hovered_cell or old_surface != _hovered_surface:
+			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
+		return
+
+	# Calculate position within cell to determine corner vs center (sculpt tool)
+	var local_pos := _terrain.to_local(hit_pos)
+	var cell_size := _terrain.terrain_data.cell_size
+	var cell_local_x := local_pos.x - _hovered_cell.x * cell_size
+	var cell_local_z := local_pos.z - _hovered_cell.y * cell_size
+
+	# Normalize to 0-1 range within cell
+	var norm_x := cell_local_x / cell_size
+	var norm_z := cell_local_z / cell_size
+
+	# Check distance to each corner
+	var corner_dists: Array[float] = [
+		Vector2(norm_x, norm_z).length(),              # NW (0,0)
+		Vector2(norm_x - 1.0, norm_z).length(),        # NE (1,0)
+		Vector2(norm_x - 1.0, norm_z - 1.0).length(),  # SE (1,1)
+		Vector2(norm_x, norm_z - 1.0).length(),        # SW (0,1)
+	]
+
+	# Find closest corner
+	var min_dist := corner_dists[0]
+	var closest_corner := 0
+	for i in range(1, 4):
+		if corner_dists[i] < min_dist:
+			min_dist = corner_dists[i]
+			closest_corner = i
+
+	_hovered_corner = closest_corner
+
+	# Determine mode based on distance to corner
+	if min_dist < CORNER_THRESHOLD:
+		_hover_mode = HoverMode.CORNER
+	else:
+		_hover_mode = HoverMode.CELL
+
+	if old_cell != _hovered_cell or old_corner != _hovered_corner or old_mode != _hover_mode:
+		hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
 
 
-func _raycast_terrain(origin: Vector3, direction: Vector3) -> Variant:
+func _surface_from_normal(normal: Vector3) -> TerrainData.Surface:
+	var up_dot := abs(normal.y)
+
+	# Top surface detection (mostly horizontal)
+	if up_dot > 0.7:
+		return TerrainData.Surface.TOP
+
+	# Wall surface - determine direction from normal
+	var abs_normal := normal.abs()
+	if abs_normal.z > abs_normal.x:
+		# North or South wall
+		return TerrainData.Surface.NORTH if normal.z < 0 else TerrainData.Surface.SOUTH
+	else:
+		# East or West wall
+		return TerrainData.Surface.EAST if normal.x > 0 else TerrainData.Surface.WEST
+
+
+func _raycast_terrain(origin: Vector3, direction: Vector3) -> Dictionary:
 	if not _terrain or not _terrain.terrain_data:
-		return null
+		return {}
 
 	var space_state := _terrain.get_world_3d().direct_space_state
 	var end := origin + direction * 1000.0
@@ -364,39 +493,56 @@ func _raycast_terrain(origin: Vector3, direction: Vector3) -> Variant:
 
 	var result := space_state.intersect_ray(query)
 	if result.is_empty():
-		return null
+		return {}
 
 	# Check if we hit the terrain
 	var collider := result.get("collider")
 	if collider and collider.get_parent() == _terrain:
-		return result.get("position")
+		return {
+			"position": result.get("position"),
+			"normal": result.get("normal", Vector3.UP)
+		}
 
-	return null
+	return {}
 
 
-func _paint_cell(data: TerrainData, x: int, z: int) -> bool:
-	var old_texture := data.get_texture_index(x, z)
-	if old_texture == current_texture:
+func _paint_cell(data: TerrainData, x: int, z: int, surface: TerrainData.Surface) -> bool:
+	var old_packed := data.get_tile_packed(x, z, surface)
+	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
+
+	if old_packed == new_packed:
 		return false
 
-	undo_redo.create_action("Paint Terrain")
-	undo_redo.add_do_method(data, "set_texture_index", x, z, current_texture)
-	undo_redo.add_undo_method(data, "set_texture_index", x, z, old_texture)
+	undo_redo.create_action("Paint Terrain Tile")
+	undo_redo.add_do_method(data, "set_tile_packed", x, z, surface, new_packed)
+	undo_redo.add_undo_method(data, "set_tile_packed", x, z, surface, old_packed)
 	undo_redo.commit_action()
 
 	return true
+
+
+# Helper functions for paint tool rotation/flip
+func rotate_paint_cw() -> void:
+	current_paint_rotation = ((current_paint_rotation + 1) % 4) as TerrainData.Rotation
+
+
+func rotate_paint_ccw() -> void:
+	current_paint_rotation = ((current_paint_rotation + 3) % 4) as TerrainData.Rotation
+
+
+func toggle_paint_flip_h() -> void:
+	current_paint_flip_h = not current_paint_flip_h
+
+
+func toggle_paint_flip_v() -> void:
+	current_paint_flip_v = not current_paint_flip_v
 
 
 func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 	if _hovered_cell.x < 0 or not terrain or current_tool == Tool.NONE:
 		return
 
-	# Get the viewport camera
-	var viewport := overlay.get_viewport()
-	if not viewport:
-		return
-
-	var camera := viewport.get_camera_3d()
+	var camera := _last_camera
 	if not camera:
 		return
 
@@ -404,34 +550,102 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 	if not data:
 		return
 
-	# Use drag cell if dragging, otherwise hovered cell
 	var display_cell := _drag_cell if _is_dragging else _hovered_cell
-	var display_corner := _drag_corner if _is_dragging else _hovered_corner
-	var display_mode := _drag_mode if _is_dragging else _hover_mode
-
 	if display_cell.x < 0:
 		return
 
-	# Get cell corners in world space
-	var top_corners := data.get_top_world_corners(display_cell.x, display_cell.y)
+	# Paint tool: highlight the specific surface face
+	if current_tool == Tool.PAINT:
+		_draw_surface_highlight(overlay, camera, terrain, data, display_cell, _hovered_surface)
+		return
 
-	# Transform to screen space and draw
+	# Sculpt tool: draw cell/corner highlight
+	var display_corner := _drag_corner if _is_dragging else _hovered_corner
+	var display_mode := _drag_mode if _is_dragging else _hover_mode
+
+	var color := Color.YELLOW if not _is_dragging else Color.GREEN
+
+	if display_mode == HoverMode.CORNER and display_corner >= 0:
+		# Corner mode: highlight the specific corner area
+		_draw_corner_highlight(overlay, camera, terrain, data, display_cell, display_corner, color)
+	else:
+		# Cell mode: highlight the entire top surface
+		_draw_surface_highlight(overlay, camera, terrain, data, display_cell, TerrainData.Surface.TOP, color)
+
+
+func _draw_surface_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, surface: TerrainData.Surface, color: Color = Color.CYAN) -> void:
+	# Get surface corners in world space
+	var surface_corners := data.get_surface_world_corners(cell.x, cell.y, surface)
+
+	# Transform to screen space
 	var screen_points: Array[Vector2] = []
-	for corner in top_corners:
+	var any_behind := false
+	for corner in surface_corners:
 		var world_pos := terrain.to_global(corner)
 		if camera.is_position_behind(world_pos):
-			return
+			any_behind = true
+			break
 		screen_points.append(camera.unproject_position(world_pos))
 
-	# Draw cell outline
-	var color := Color.YELLOW if not _is_dragging else Color.GREEN
-	color.a = 0.8
+	if any_behind or screen_points.size() != 4:
+		return
 
+	# Draw outline
+	var outline_color := color
+	outline_color.a = 0.9
 	for i in 4:
 		var next := (i + 1) % 4
-		overlay.draw_line(screen_points[i], screen_points[next], color, 2.0)
+		overlay.draw_line(screen_points[i], screen_points[next], outline_color, 3.0)
 
-	# Highlight hovered corner when in corner mode
-	if display_mode == HoverMode.CORNER and display_corner >= 0:
-		var corner_pos := screen_points[display_corner]
-		overlay.draw_circle(corner_pos, 8.0, Color.RED if not _is_dragging else Color.GREEN)
+	# Draw filled quad with transparency
+	var fill_color := color
+	fill_color.a = 0.25
+	var points := PackedVector2Array(screen_points)
+	overlay.draw_colored_polygon(points, fill_color)
+
+
+func _draw_corner_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, corner: int, color: Color) -> void:
+	# Get top corners in world space
+	var top_corners := data.get_top_world_corners(cell.x, cell.y)
+
+	# Calculate corner area (quadrilateral from corner to midpoints of adjacent edges)
+	var corner_pos := top_corners[corner]
+	var prev_corner := top_corners[(corner + 3) % 4]
+	var next_corner := top_corners[(corner + 1) % 4]
+	var center := (top_corners[0] + top_corners[1] + top_corners[2] + top_corners[3]) / 4.0
+
+	# Create a smaller quad around the corner
+	var mid_to_prev := (corner_pos + prev_corner) / 2.0
+	var mid_to_next := (corner_pos + next_corner) / 2.0
+	var mid_to_center := (corner_pos + center) / 2.0
+
+	var world_points: Array[Vector3] = [corner_pos, mid_to_next, mid_to_center, mid_to_prev]
+
+	# Transform to screen space
+	var screen_points: Array[Vector2] = []
+	var any_behind := false
+	for point in world_points:
+		var world_pos := terrain.to_global(point)
+		if camera.is_position_behind(world_pos):
+			any_behind = true
+			break
+		screen_points.append(camera.unproject_position(world_pos))
+
+	if any_behind or screen_points.size() != 4:
+		return
+
+	# Draw outline
+	var outline_color := color
+	outline_color.a = 0.9
+	for i in 4:
+		var next := (i + 1) % 4
+		overlay.draw_line(screen_points[i], screen_points[next], outline_color, 3.0)
+
+	# Draw filled quad
+	var fill_color := color
+	fill_color.a = 0.35
+	var points := PackedVector2Array(screen_points)
+	overlay.draw_colored_polygon(points, fill_color)
+
+	# Draw corner circle
+	overlay.draw_circle(screen_points[0], 6.0, color)

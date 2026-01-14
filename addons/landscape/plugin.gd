@@ -2,12 +2,11 @@
 extends EditorPlugin
 
 const LandscapeTerrainScript = preload("res://addons/landscape/nodes/landscape.gd")
-const TerrainEditorScript = preload("res://addons/landscape/editor/terrain_editor.gd")
 const TerrainDockScene = preload("res://addons/landscape/editor/terrain_dock.tscn")
 const TerrainInspectorPluginScript = preload("res://addons/landscape/editor/terrain_inspector_plugin.gd")
 
 var _dock: Control
-var _terrain_editor: RefCounted  # TerrainEditor
+var _terrain_editor: TerrainEditor
 var _current_terrain: LandscapeTerrain
 var _inspector_plugin: EditorInspectorPlugin
 
@@ -22,7 +21,7 @@ func _enter_tree() -> void:
 	)
 
 	# Create terrain editor
-	_terrain_editor = TerrainEditorScript.new()
+	_terrain_editor = TerrainEditor.new()
 	_terrain_editor.editor_interface = get_editor_interface()
 	_terrain_editor.undo_redo = get_undo_redo()
 	_terrain_editor.hover_changed.connect(_on_hover_changed)
@@ -35,7 +34,7 @@ func _enter_tree() -> void:
 	# Create dock
 	if ResourceLoader.exists("res://addons/landscape/editor/terrain_dock.tscn"):
 		_dock = TerrainDockScene.instantiate()
-		_dock.terrain_editor = _terrain_editor
+		_dock.set("terrain_editor", _terrain_editor)
 		add_control_to_dock(DOCK_SLOT_RIGHT_UL, _dock)
 		_dock.visible = false
 
@@ -63,6 +62,8 @@ func _edit(object: Object) -> void:
 	_current_terrain = object as LandscapeTerrain
 	if _terrain_editor:
 		_terrain_editor.set_terrain(_current_terrain)
+	if _dock:
+		_dock.set("terrain", _current_terrain)
 	_update_dock_visibility()
 
 
@@ -81,8 +82,11 @@ func _forward_3d_gui_input(viewport_camera: Camera3D, event: InputEvent) -> int:
 
 	var handled: bool = _terrain_editor.handle_input(viewport_camera, event, _current_terrain)
 
-	if handled:
+	# Always update overlays on mouse motion to ensure hover highlight is shown
+	if event is InputEventMouseMotion:
 		update_overlays()
+
+	if handled:
 		return EditorPlugin.AFTER_GUI_INPUT_STOP
 
 	return EditorPlugin.AFTER_GUI_INPUT_PASS
@@ -94,11 +98,6 @@ func _forward_3d_draw_over_viewport(overlay: Control) -> void:
 	_terrain_editor.draw_overlay(overlay, _current_terrain)
 
 
-func _on_hover_changed(cell: Vector2i, corner: int, mode: int) -> void:
-	if not _current_terrain:
-		return
-	if cell.x >= 0:
-		var corner_mode := mode == 1  # HoverMode.CORNER = 1
-		_current_terrain.set_selected_cell(cell, corner, corner_mode)
-	else:
-		_current_terrain.clear_selection()
+func _on_hover_changed(_cell: Vector2i, _corner: int, _mode: int) -> void:
+	# Overlay-based highlighting is handled in draw_overlay
+	pass

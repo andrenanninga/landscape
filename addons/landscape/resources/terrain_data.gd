@@ -7,6 +7,12 @@ signal data_changed
 # Corner indices
 enum Corner { NW = 0, NE = 1, SE = 2, SW = 3 }
 
+# Surface types for tile painting
+enum Surface { TOP = 0, NORTH = 1, EAST = 2, SOUTH = 3, WEST = 4 }
+
+# Tile rotation values
+enum Rotation { ROT_0 = 0, ROT_90 = 1, ROT_180 = 2, ROT_270 = 3 }
+
 # Grid configuration
 var _skip_resize: bool = false
 
@@ -39,15 +45,24 @@ var _skip_resize: bool = false
 		max_slope_steps = maxi(1, value)
 
 # Cell data storage
-# Each cell has: 4 top corners + 4 floor corners + 1 texture index = 9 ints
-# Layout: [top_nw, top_ne, top_se, top_sw, floor_nw, floor_ne, floor_se, floor_sw, texture]
-# Total size: grid_width * grid_depth * 9
+# Each cell has: 4 top corners + 4 floor corners + 5 tile values = 13 ints
+# Layout: [top_nw, top_ne, top_se, top_sw, floor_nw, floor_ne, floor_se, floor_sw,
+#          tile_top, tile_north, tile_east, tile_south, tile_west]
+# Each tile value is packed: bits 0-7 = tile index, bits 8-9 = rotation, bit 10 = flip_h, bit 11 = flip_v
+# Total size: grid_width * grid_depth * 13
 @export var cells: PackedInt32Array = PackedInt32Array()
 
-const CELL_DATA_SIZE := 9
+const CELL_DATA_SIZE := 13
 const TOP_OFFSET := 0
 const FLOOR_OFFSET := 4
-const TEXTURE_OFFSET := 8
+const TILE_OFFSET := 8  # Start of tile data (5 surfaces: top, north, east, south, west)
+
+# Bit packing constants for tile values
+const TILE_INDEX_MASK := 0xFF        # Bits 0-7: tile index (0-255)
+const TILE_ROTATION_MASK := 0x300    # Bits 8-9: rotation (0-3)
+const TILE_ROTATION_SHIFT := 8
+const TILE_FLIP_H_BIT := 0x400       # Bit 10: flip horizontal
+const TILE_FLIP_V_BIT := 0x800       # Bit 11: flip vertical
 
 
 func _init() -> void:
@@ -168,19 +183,82 @@ func set_floor_corners(x: int, z: int, corners: Array[int]) -> void:
 		data_changed.emit()
 
 
-# Texture accessor
-func get_texture_index(x: int, z: int) -> int:
+# Tile packing/unpacking utilities
+static func pack_tile(tile_index: int, rotation: Rotation = Rotation.ROT_0, flip_h: bool = false, flip_v: bool = false) -> int:
+	var packed := tile_index & TILE_INDEX_MASK
+	packed |= (rotation << TILE_ROTATION_SHIFT)
+	if flip_h:
+		packed |= TILE_FLIP_H_BIT
+	if flip_v:
+		packed |= TILE_FLIP_V_BIT
+	return packed
+
+
+static func unpack_tile(packed: int) -> Dictionary:
+	return {
+		"tile_index": packed & TILE_INDEX_MASK,
+		"rotation": (packed & TILE_ROTATION_MASK) >> TILE_ROTATION_SHIFT,
+		"flip_h": (packed & TILE_FLIP_H_BIT) != 0,
+		"flip_v": (packed & TILE_FLIP_V_BIT) != 0,
+	}
+
+
+# Tile accessors - get raw packed value
+func get_tile_packed(x: int, z: int, surface: Surface) -> int:
 	if not is_valid_cell(x, z):
 		return 0
-	return cells[_cell_index(x, z) + TEXTURE_OFFSET]
+	return cells[_cell_index(x, z) + TILE_OFFSET + surface]
 
 
-func set_texture_index(x: int, z: int, texture: int) -> void:
+func set_tile_packed(x: int, z: int, surface: Surface, packed: int) -> void:
 	if not is_valid_cell(x, z):
 		return
-	var idx := _cell_index(x, z) + TEXTURE_OFFSET
-	if cells[idx] != texture:
-		cells[idx] = texture
+	var idx := _cell_index(x, z) + TILE_OFFSET + surface
+	if cells[idx] != packed:
+		cells[idx] = packed
+		data_changed.emit()
+
+
+# Tile accessors - convenience methods for individual components
+func get_tile_index(x: int, z: int, surface: Surface) -> int:
+	return get_tile_packed(x, z, surface) & TILE_INDEX_MASK
+
+
+func get_tile_rotation(x: int, z: int, surface: Surface) -> Rotation:
+	var packed := get_tile_packed(x, z, surface)
+	return ((packed & TILE_ROTATION_MASK) >> TILE_ROTATION_SHIFT) as Rotation
+
+
+func get_tile_flip_h(x: int, z: int, surface: Surface) -> bool:
+	return (get_tile_packed(x, z, surface) & TILE_FLIP_H_BIT) != 0
+
+
+func get_tile_flip_v(x: int, z: int, surface: Surface) -> bool:
+	return (get_tile_packed(x, z, surface) & TILE_FLIP_V_BIT) != 0
+
+
+func set_tile(x: int, z: int, surface: Surface, tile_index: int, rotation: Rotation = Rotation.ROT_0, flip_h: bool = false, flip_v: bool = false) -> void:
+	set_tile_packed(x, z, surface, pack_tile(tile_index, rotation, flip_h, flip_v))
+
+
+# Get all 5 tile values for a cell (packed)
+func get_all_tiles_packed(x: int, z: int) -> Array[int]:
+	if not is_valid_cell(x, z):
+		return [0, 0, 0, 0, 0]
+	var idx := _cell_index(x, z) + TILE_OFFSET
+	return [cells[idx], cells[idx + 1], cells[idx + 2], cells[idx + 3], cells[idx + 4]]
+
+
+func set_all_tiles_packed(x: int, z: int, tiles: Array[int]) -> void:
+	if not is_valid_cell(x, z) or tiles.size() != 5:
+		return
+	var idx := _cell_index(x, z) + TILE_OFFSET
+	var changed := false
+	for i in 5:
+		if cells[idx + i] != tiles[i]:
+			cells[idx + i] = tiles[i]
+			changed = true
+	if changed:
 		data_changed.emit()
 
 
@@ -245,3 +323,56 @@ func get_floor_world_corners(x: int, z: int) -> Array[Vector3]:
 		Vector3(base_x + cell_size, steps_to_world(corners[Corner.SE]), base_z + cell_size), # SE
 		Vector3(base_x, steps_to_world(corners[Corner.SW]), base_z + cell_size),          # SW
 	]
+
+
+# Get world-space corner positions for any surface of a cell
+# Returns 4 corners in order suitable for drawing a quad (clockwise when viewed from outside)
+func get_surface_world_corners(x: int, z: int, surface: Surface) -> Array[Vector3]:
+	var base_x := x * cell_size
+	var base_z := z * cell_size
+	var top := get_top_corners(x, z)
+	var floor := get_floor_corners(x, z)
+
+	match surface:
+		Surface.TOP:
+			return [
+				Vector3(base_x, steps_to_world(top[Corner.NW]), base_z),
+				Vector3(base_x + cell_size, steps_to_world(top[Corner.NE]), base_z),
+				Vector3(base_x + cell_size, steps_to_world(top[Corner.SE]), base_z + cell_size),
+				Vector3(base_x, steps_to_world(top[Corner.SW]), base_z + cell_size),
+			]
+		Surface.NORTH:
+			# North wall: along z=0 edge (NW to NE), top to floor
+			return [
+				Vector3(base_x, steps_to_world(top[Corner.NW]), base_z),
+				Vector3(base_x + cell_size, steps_to_world(top[Corner.NE]), base_z),
+				Vector3(base_x + cell_size, steps_to_world(floor[Corner.NE]), base_z),
+				Vector3(base_x, steps_to_world(floor[Corner.NW]), base_z),
+			]
+		Surface.SOUTH:
+			# South wall: along z=cell_size edge (SW to SE), top to floor
+			return [
+				Vector3(base_x + cell_size, steps_to_world(top[Corner.SE]), base_z + cell_size),
+				Vector3(base_x, steps_to_world(top[Corner.SW]), base_z + cell_size),
+				Vector3(base_x, steps_to_world(floor[Corner.SW]), base_z + cell_size),
+				Vector3(base_x + cell_size, steps_to_world(floor[Corner.SE]), base_z + cell_size),
+			]
+		Surface.EAST:
+			# East wall: along x=cell_size edge (NE to SE), top to floor
+			return [
+				Vector3(base_x + cell_size, steps_to_world(top[Corner.NE]), base_z),
+				Vector3(base_x + cell_size, steps_to_world(top[Corner.SE]), base_z + cell_size),
+				Vector3(base_x + cell_size, steps_to_world(floor[Corner.SE]), base_z + cell_size),
+				Vector3(base_x + cell_size, steps_to_world(floor[Corner.NE]), base_z),
+			]
+		Surface.WEST:
+			# West wall: along x=0 edge (NW to SW), top to floor
+			return [
+				Vector3(base_x, steps_to_world(top[Corner.SW]), base_z + cell_size),
+				Vector3(base_x, steps_to_world(top[Corner.NW]), base_z),
+				Vector3(base_x, steps_to_world(floor[Corner.NW]), base_z),
+				Vector3(base_x, steps_to_world(floor[Corner.SW]), base_z + cell_size),
+			]
+
+	# Fallback to top surface
+	return get_top_world_corners(x, z)

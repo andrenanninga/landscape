@@ -40,6 +40,105 @@ toggle_mode = true
 text = "Sculpt"
 tooltip_text = "Drag to sculpt terrain - drag up to raise, drag down to lower. Click center for cell, near corner for single corner."
 
+[node name="PaintButton" type="Button" parent="VBoxContainer/TerrainTools"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+text = "Paint"
+tooltip_text = "Click to paint tiles. Surface is auto-detected from click position."
+
+[node name="PaintSection" type="VBoxContainer" parent="VBoxContainer"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SurfaceLabel" type="Label" parent="VBoxContainer/PaintSection"]
+layout_mode = 2
+text = "Surface"
+theme_type_variation = &"HeaderSmall"
+
+[node name="SurfaceSelector" type="OptionButton" parent="VBoxContainer/PaintSection"]
+unique_name_in_owner = true
+layout_mode = 2
+item_count = 5
+popup/item_0/text = "Top"
+popup/item_1/text = "North"
+popup/item_1/id = 1
+popup/item_2/text = "East"
+popup/item_2/id = 2
+popup/item_3/text = "South"
+popup/item_3/id = 3
+popup/item_4/text = "West"
+popup/item_4/id = 4
+
+[node name="TransformLabel" type="Label" parent="VBoxContainer/PaintSection"]
+layout_mode = 2
+text = "Transform"
+theme_type_variation = &"HeaderSmall"
+
+[node name="TransformControls" type="HBoxContainer" parent="VBoxContainer/PaintSection"]
+layout_mode = 2
+
+[node name="RotateCCWButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Rotate Counter-Clockwise (Shift+R)"
+text = "↺"
+
+[node name="RotateCWButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Rotate Clockwise (R)"
+text = "↻"
+
+[node name="FlipHButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Flip Horizontal (H)"
+text = "⇆"
+
+[node name="FlipVButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Flip Vertical (V)"
+text = "⇅"
+
+[node name="RotationLabel" type="Label" parent="VBoxContainer/PaintSection/TransformControls"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0°"
+horizontal_alignment = 2
+
+[node name="TileLabel" type="Label" parent="VBoxContainer/PaintSection"]
+layout_mode = 2
+text = "Tile"
+theme_type_variation = &"HeaderSmall"
+
+[node name="GeneratePlaceholdersButton" type="Button" parent="VBoxContainer/PaintSection"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Generate Placeholder Tiles"
+tooltip_text = "Create a 4x4 placeholder tileset and assign it to the terrain"
+
+[node name="TilePaletteScroll" type="ScrollContainer" parent="VBoxContainer/PaintSection"]
+custom_minimum_size = Vector2(0, 300)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="TilePaletteGrid" type="GridContainer" parent="VBoxContainer/PaintSection/TilePaletteScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+columns = 4
+
+[node name="Spacer" type="Control" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
 [node name="HSeparator2" type="HSeparator" parent="VBoxContainer"]
 layout_mode = 2
 

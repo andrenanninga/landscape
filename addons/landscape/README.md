@@ -9,25 +9,31 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Per-cell independent geometry** - cells don't share vertices, allowing walls between adjacent cells
 - **Top + Floor surfaces** - each cell has both a top surface and a floor surface with independent corner heights
 - **Slope support** - individual corners can be raised/lowered within slope constraints (edge-adjacent only)
-- **Pixel art shader** - flat shading with checkerboard pattern, 6 distinct direction colors
+- **Pixel art shader** - flat shading with tiled textures, supports atlas-based tile painting
 - **Drag-based sculpting** - click and drag to raise/lower terrain with camera-aware height tracking
 - **Smart corner detection** - automatically detects cell vs corner mode based on cursor position
-- **Visual feedback** - shader-based selection highlight and sidebar status display
+- **Paint tool** - paint tiles on any surface (top, north, south, east, west) with rotation/flip
+- **Visual feedback** - overlay-based selection highlight and sidebar status display
 
 ## Architecture
 
 ### Data Model
 
-Each cell stores **8 corner heights** (4 for top, 4 for floor) plus a texture index:
+Each cell stores **8 corner heights** (4 for top, 4 for floor) plus **5 surface tiles**:
 - Corners: NW, NE, SE, SW (clockwise from top-left when viewed from above)
 - Heights stored as integer steps, converted to world units via `height_step` multiplier
 - Floor must always be at or below top
+- Surfaces: TOP, NORTH, EAST, SOUTH, WEST - each with tile index, rotation (0-3), flip_h, flip_v
 
 ```
 Cell[x,z]:
   top_corners   = [NW, NE, SE, SW]   # Top surface heights
   floor_corners = [NW, NE, SE, SW]   # Floor surface heights
-  texture_index = int                 # For painting (future)
+  surfaces[5]:                        # Per-surface tile data
+    tile_index  = int (0-255)        # Index into tile atlas
+    rotation    = int (0-3)          # 0°, 90°, 180°, 270° clockwise
+    flip_h      = bool               # Horizontal flip
+    flip_v      = bool               # Vertical flip
 ```
 
 ### Mesh Generation
@@ -54,13 +60,15 @@ addons/landscape/
 │
 ├── resources/
 │   ├── terrain_data.gd             # TerrainData Resource - stores all cell data
-│   └── terrain_texture_set.gd      # TerrainTextureSet Resource - texture config
+│   ├── terrain_tile_set.gd         # TerrainTileSet Resource - tile atlas config
+│   └── placeholder_tiles.gd        # Generates placeholder colored tiles
 │
 ├── nodes/
 │   └── landscape.gd                # LandscapeTerrain node (MeshInstance3D)
 │
 ├── editor/
 │   ├── terrain_editor.gd           # Tool coordination, raycasting, input handling
+│   ├── terrain_inspector_plugin.gd # Inspector plugin for undo/redo
 │   ├── terrain_dock.gd             # UI panel script
 │   └── terrain_dock.tscn           # UI panel scene
 │
@@ -68,7 +76,8 @@ addons/landscape/
 │   └── terrain_mesh_builder.gd     # Procedural mesh generation with SurfaceTool
 │
 └── shaders/
-    └── terrain.gdshader            # Auto-texturing shader (top/wall/floor colors)
+    ├── terrain.gdshader            # Auto-texturing shader (checkerboard colors)
+    └── terrain_tiled.gdshader      # Tiled texture shader with atlas support
 ```
 
 ## Key Classes
@@ -85,20 +94,28 @@ Key methods:
 - `get_top_corners(x, z)` / `set_top_corners(x, z, corners)`
 - `get_floor_corners(x, z)` / `set_floor_corners(x, z, corners)`
 - `get_top_world_corners(x, z)` - Returns Vector3 positions
+- `get_surface_world_corners(x, z, surface)` - Returns 4 corners for any surface face
 - `raise_cell(x, z, delta)` - Raise/lower all top corners
 - `is_valid_slope(corners)` - Check slope constraints (edge-adjacent only, allows diagonal slopes)
+- `get_surface_tile(x, z, surface)` / `set_surface_tile(x, z, surface, tile, rot, flip_h, flip_v)`
+- `pack_tile_data()` - Returns tile data texture for shader
 
 ### LandscapeTerrain (Node)
 Main terrain node extending MeshInstance3D:
 - `terrain_data` - The TerrainData resource
-- `texture_set` - Optional TerrainTextureSet for texturing
+- `tile_set` - Optional TerrainTileSet for tiled texturing
 - `auto_rebuild` - Automatically rebuild mesh on data changes
 - Exposes terrain parameters directly: `grid_width`, `grid_depth`, `cell_size`, `height_step`, `max_slope_steps`
 - `rebuild_mesh()` - Regenerate the mesh
 - `world_to_cell(pos)` - Convert world position to cell coordinates
 - `world_to_corner(pos)` - Convert world position to nearest corner
-- `set_selected_cell(cell, corner, corner_mode)` - Update shader selection highlight
-- `clear_selection()` - Remove selection highlight
+
+### TerrainTileSet (Resource)
+Defines tile atlas configuration:
+- `atlas_texture` - The tile atlas image
+- `atlas_columns` / `atlas_rows` - Grid dimensions of the atlas
+- `get_tile_count()` - Total number of tiles
+- `get_tile_uv_rect(index)` - UV coordinates for a tile
 
 ### TerrainMeshBuilder (RefCounted)
 Generates ArrayMesh from TerrainData using SurfaceTool:
@@ -111,34 +128,33 @@ Editor tool coordination:
 - **Smart corner detection**: Automatically switches between cell mode (center) and corner mode (near corners)
 - **Camera-aware**: Height follows mouse position accounting for camera perspective
 - **Constraint propagation**: Dragging a corner pulls adjacent corners when slope limit is reached
-- Hover and outline only active when a tool is selected
+- **Surface painting**: Click any surface (top/north/south/east/west) to paint tiles
+- **Surface detection**: Raycast normal determines which surface is being hovered
+- Hover and overlay highlighting only active when a tool is selected
 - Handles viewport raycasting and input
 - Integrates with EditorUndoRedoManager for undo/redo
 
-## Shader
+## Shaders
 
-The terrain shader (`terrain.gdshader`) provides pixel art aesthetics with flat shading:
-
-### Visual Style
+### terrain.gdshader (Checkerboard)
+Basic shader with colored checkerboard pattern per face direction:
 - **Unshaded rendering** - No lighting, pure flat colors
 - **Nearest filtering** - Pixelated texture look
 - **Checkerboard pattern** - Two-tone pattern per face direction
 - **Face normals via derivatives** - True flat shading using `dFdx`/`dFdy`
 
-### Direction Colors (Checkerboard)
-- **Up (top faces)**: Blue (`0.2, 0.6, 0.9`) / Dark blue (`0.1, 0.4, 0.7`)
-- **Down (floor)**: Yellow (`0.9, 0.8, 0.2`) / Dark yellow (`0.7, 0.6, 0.1`)
-- **North (-Z)**: Red (`0.9, 0.2, 0.2`) / Dark red (`0.7, 0.1, 0.1`)
-- **South (+Z)**: Green (`0.2, 0.8, 0.3`) / Dark green (`0.1, 0.6, 0.2`)
-- **East (+X)**: Orange (`0.95, 0.5, 0.1`) / Dark orange (`0.75, 0.35, 0.05`)
-- **West (-X)**: Purple (`0.6, 0.3, 0.8`) / Dark purple (`0.45, 0.2, 0.6`)
+Direction Colors:
+- **Up**: Blue / **Down**: Yellow
+- **North**: Red / **South**: Green
+- **East**: Orange / **West**: Purple
 
-### Selection Highlight
-- Shader-based cell and corner highlighting on top faces only
-- Cell mode: Border highlight around entire cell
-- Corner mode: Chevron highlight pointing to selected corner
-
-Supports optional texture assignment for top and side surfaces with triplanar mapping.
+### terrain_tiled.gdshader (Tiled Textures)
+PBR shader with atlas-based tile texturing:
+- **Per-surface tiles** - Each cell face can have different tile
+- **Tile transformations** - Rotation (0°/90°/180°/270°) and flip (H/V)
+- **Tile data texture** - GPU-side storage of per-cell tile info
+- **Surface detection** - Automatic top/wall detection from face normals
+- **Selection highlight** - Visual feedback for hovered cell (top faces)
 
 ## Usage
 
@@ -152,7 +168,14 @@ Supports optional texture assignment for top and side surfaces with triplanar ma
    - Height follows mouse position with camera perspective awareness
    - Adjacent corners are automatically pulled when slope limit is reached
    - Right-click to cancel drag and restore original heights
-5. View cell info and height in the sidebar dock (updates on hover and drag)
+5. Use the **Paint** tool:
+   - Click "Generate Placeholder Tiles" to create a test tileset
+   - Select a tile from the palette
+   - Click any surface (top, north, south, east, west) to paint
+   - Use rotation buttons (↺ ↻) to rotate the tile
+   - Use flip buttons (⇆ ⇅) to flip horizontally/vertically
+   - Status bar shows which surface is being hovered
+6. View cell info in the sidebar dock (updates on hover and drag)
 
 ## Current Status
 
@@ -164,15 +187,18 @@ Supports optional texture assignment for top and side surfaces with triplanar ma
 - [x] Camera-aware height tracking
 - [x] Slope constraint propagation (edge-adjacent only)
 - [x] Pixel art shader with flat shading and checkerboard pattern
-- [x] 6 distinct direction colors
-- [x] Shader-based selection highlight (cell and corner modes)
-- [x] Sidebar status display (cell, corner, height)
+- [x] Tiled texture shader with atlas support
+- [x] Paint tool with per-surface tiles (top + 4 walls)
+- [x] Tile rotation (0°/90°/180°/270°) and flip (H/V)
+- [x] Overlay-based selection highlight (cell and corner modes)
+- [x] Sidebar status display (cell, corner, height, surface)
+- [x] Tile palette UI with large buttons for pixel art
+- [x] Placeholder tile generator for testing
 - [x] Undo/redo support
 - [x] Collision generation
 - [x] Terrain parameters exposed directly on LandscapeTerrain node
 
 ### Not Yet Implemented
-- [ ] Paint tool (texture per cell)
 - [ ] Floor editing tools
 - [ ] Brush size options
 - [ ] Multi-cell selection

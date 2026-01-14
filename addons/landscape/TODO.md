@@ -3,30 +3,39 @@
 ## Next Steps (Priority Order)
 
 ### High Priority
-1. **Paint tool** - Apply texture index per cell, shader needs to support multiple textures
-2. **Floor editing** - Tools to raise/lower floor surfaces
-3. **Brush size** - Allow affecting multiple cells at once
+1. **Floor editing** - Tools to raise/lower floor surfaces
+2. **Brush size** - Allow affecting multiple cells at once
+3. **Custom tile atlas import** - Load user-provided tile atlases
 
 ### Medium Priority
 4. **Keyboard shortcuts** - Quick tool switching (1-6 keys)
 5. **Grid overlay** - Show grid lines in editor for better visualization
 6. **Multi-cell selection** - Select and edit multiple cells at once
+7. **Paint fill tool** - Fill connected surfaces with same tile
 
 ### Low Priority
-7. **Custom node icon** - Create SVG icon for LandscapeTerrain in scene tree
-8. **Import/export** - Save/load terrain data to file
-9. **Copy/paste regions** - Select and duplicate terrain sections
-10. **Smoothing tool** - Average heights between cells
-11. **Flatten tool** - Set region to specific height
+8. **Custom node icon** - Create SVG icon for LandscapeTerrain in scene tree
+9. **Import/export** - Save/load terrain data to file
+10. **Copy/paste regions** - Select and duplicate terrain sections
+11. **Smoothing tool** - Average heights between cells
+12. **Flatten tool** - Set region to specific height
 
 ## Recently Completed
+- [x] **Paint tool** - Click any surface to paint tiles (top, north, south, east, west)
+- [x] **Tile atlas system** - TerrainTileSet resource with atlas texture support
+- [x] **Tile transformations** - Rotation (0°/90°/180°/270°) and flip (H/V)
+- [x] **Tiled shader** - PBR shader with per-surface tile data texture
+- [x] **Surface detection** - Raycast normal determines hovered surface
+- [x] **Overlay highlighting** - Replaced shader-based selection with overlay polygons
+- [x] **Tile palette UI** - Large buttons (96x96) for pixel art readability
+- [x] **Placeholder tiles** - Generate colored test tileset
+- [x] **Status bar surface display** - Shows hovered surface name in paint mode
 - [x] **Pixel art shader** - Flat shading, nearest filtering, checkerboard with 6 direction colors
 - [x] **Drag-based sculpting** - Click and drag to raise/lower (replaced click tools)
 - [x] **Smart corner detection** - Auto-detect cell vs corner mode based on cursor position
 - [x] **Camera-aware height** - Height follows mouse with perspective correction
 - [x] **Slope constraint propagation** - Adjacent corners pulled when slope limit reached
 - [x] **Edge-only slope validation** - Diagonal slopes now allowed (max 2 with slope=1)
-- [x] **Selection highlight** - Shader-based cell and corner highlighting
 - [x] **Sidebar status** - Show cell, corner, and height in dock (replaces overlay toast)
 - [x] **Tool-gated hover** - Outline and hover only active when tool selected
 - [x] **Exposed parameters** - Terrain settings directly on LandscapeTerrain node
@@ -74,3 +83,29 @@
 - Exposed terrain parameters directly on LandscapeTerrain node
 - Reduced default height_step from 0.5 to 0.25
 - Reduced default max_slope_steps from 2 to 1
+
+### 2025-01-14 - Paint Tool & Tile System
+- Implemented complete paint tool for all surfaces:
+  - Surface detection from raycast hit normal
+  - Position adjustment for wall boundaries (walls sit on cell edges)
+  - Per-surface tile data: tile index, rotation (0-3), flip_h, flip_v
+  - Undo/redo support for paint operations
+- Created TerrainTileSet resource:
+  - Atlas texture with configurable columns/rows
+  - UV rect calculation for tile lookup
+  - Placeholder tile generator (4x4 colored tiles)
+- Created terrain_tiled.gdshader:
+  - Per-surface tile sampling from data texture
+  - Tile transformations (rotation, flip)
+  - Surface detection from face normals (using dFdx/dFdy cross product)
+  - Fixed inverted normals (cross product gives camera-facing normal)
+  - PBR rendering with roughness/metallic
+- Replaced shader-based selection with overlay highlighting:
+  - draw_colored_polygon for surface faces
+  - draw_line for cell/corner borders
+  - Works for all surfaces (top + walls)
+- Updated dock UI:
+  - Tile palette with large buttons (96x96) for pixel art
+  - Rotation/flip controls
+  - Surface selector dropdown
+  - Status bar moved to bottom showing surface name
