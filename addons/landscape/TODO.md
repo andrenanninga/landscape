@@ -17,9 +17,9 @@
 9. **Import/export** - Save/load terrain data to file
 10. **Copy/paste regions** - Select and duplicate terrain sections
 11. **Smoothing tool** - Average heights between cells
-12. **Flatten tool** - Set region to specific height
 
 ## Recently Completed
+- [x] **Flatten tool** - Set cells to a target height (click near corner for its height, center for average)
 - [x] **Flip diagonal tool** - Toggle the diagonal triangulation of cells (useful for saddle-shaped terrain)
 - [x] **Brush size** - Slider to adjust brush size (1x1 to 9x9, including even sizes), affects sculpt and paint tools
 - [x] **Paint tool** - Click any surface to paint tiles (top, north, south, east, west)
@@ -127,3 +127,10 @@
   - Useful for saddle-shaped terrain where auto-selection isn't ideal
 - Fixed overlay polygon drawing:
   - Draw quads as two triangles to avoid triangulation errors at extreme camera angles
+- Implemented Flatten tool:
+  - New "Flatten" button in toolbar
+  - Click near corner to use that corner's height as target
+  - Click at cell center to use average height of all corners
+  - Magenta highlight shows affected area
+  - White dot indicates which corner is being used for target height
+  - Respects brush size for multi-cell operations

@@ -54,6 +54,13 @@ toggle_mode = true
 text = "Flip"
 tooltip_text = "Click to flip the diagonal triangulation of a cell. Useful for saddle-shaped cells."
 
+[node name="FlattenButton" type="Button" parent="VBoxContainer/TerrainTools"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+text = "Flatten"
+tooltip_text = "Click to flatten cells to the height of the selected corner. Click near a corner to use its height, or cell center for average."
+
 [node name="BrushSection" type="HBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
 

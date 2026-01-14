@@ -14,7 +14,8 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Smart corner detection** - automatically detects cell vs corner mode based on cursor position
 - **Paint tool** - paint tiles on any surface (top, north, south, east, west) with rotation/flip
 - **Flip diagonal tool** - toggle triangle diagonal direction for saddle-shaped terrain
-- **Adjustable brush size** - 1x1 to 9x9 brush for sculpt, paint, and flip tools
+- **Flatten tool** - set all corners to a target height (click corner to use its height)
+- **Adjustable brush size** - 1x1 to 9x9 brush for all terrain tools
 - **Visual feedback** - overlay-based selection highlight and sidebar status display
 
 ## Architecture
@@ -125,7 +126,7 @@ Generates ArrayMesh from TerrainData using SurfaceTool:
 
 ### TerrainEditor (RefCounted)
 Editor tool coordination:
-- Tools: SCULPT, PAINT, FLIP_DIAGONAL
+- Tools: SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN
 - **Brush size**: Adjustable 1x1 to 9x9 (including even sizes), affects all tools
 - **Drag-based sculpting**: Click and drag to raise/lower terrain
 - **Smart corner detection**: Automatically switches between cell mode (center) and corner mode (near corners)
@@ -182,11 +183,15 @@ PBR shader with atlas-based tile texturing:
    - Click a cell to toggle its diagonal triangulation
    - Useful for saddle-shaped cells where opposite corners are at different heights
    - Orange line shows current diagonal direction
-7. Adjust **Brush Size**:
+7. Use the **Flatten** tool:
+   - Click **near a corner** to flatten cells to that corner's height
+   - Click **at cell center** to flatten to the average height
+   - Magenta highlight shows affected area, white dot shows selected corner
+8. Adjust **Brush Size**:
    - Use the slider below the tool buttons (1-9)
    - Affects Sculpt, Paint, and Flip tools
    - Larger brushes edit multiple cells at once
-8. View cell info in the sidebar dock (updates on hover and drag)
+9. View cell info in the sidebar dock (updates on hover and drag)
 
 ## Current Status
 
@@ -210,6 +215,7 @@ PBR shader with atlas-based tile texturing:
 - [x] Terrain parameters exposed directly on LandscapeTerrain node
 - [x] Brush size (1x1 to 9x9) for all tools
 - [x] Flip diagonal tool for controlling cell triangulation
+- [x] Flatten tool for setting cell heights to a target corner
 
 ### Not Yet Implemented
 - [ ] Floor editing tools

@@ -2,7 +2,7 @@
 class_name TerrainEditor
 extends RefCounted
 
-enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL }
+enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN }
 enum HoverMode { CELL, CORNER }
 
 signal tool_changed(new_tool: Tool)
@@ -189,6 +189,19 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 	# Handle flip diagonal tool
 	if current_tool == Tool.FLIP_DIAGONAL:
 		_flip_diagonal_brush_area(data, _hovered_cell)
+		return true
+
+	# Handle flatten tool
+	if current_tool == Tool.FLATTEN:
+		# Get target height from the hovered corner
+		var target_height: int
+		var corners := data.get_top_corners(_hovered_cell.x, _hovered_cell.y)
+		if _hover_mode == HoverMode.CORNER and _hovered_corner >= 0:
+			target_height = corners[_hovered_corner]
+		else:
+			# Use average height if clicking cell center
+			target_height = int(round(float(corners[0] + corners[1] + corners[2] + corners[3]) / 4.0))
+		_flatten_brush_area(data, _hovered_cell, target_height)
 		return true
 
 	if current_tool != Tool.SCULPT:
@@ -466,8 +479,8 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 
 	_hovered_cell = _terrain.world_to_cell(adjusted_pos)
 
-	# For paint tool, we don't need corner detection
-	if current_tool == Tool.PAINT:
+	# For paint and flip diagonal tools, we don't need corner detection
+	if current_tool == Tool.PAINT or current_tool == Tool.FLIP_DIAGONAL:
 		_hovered_corner = -1
 		_hover_mode = HoverMode.CELL
 		if old_cell != _hovered_cell or old_surface != _hovered_surface:
@@ -553,6 +566,39 @@ func _raycast_terrain(origin: Vector3, direction: Vector3) -> Dictionary:
 		}
 
 	return {}
+
+
+func _flatten_brush_area(data: TerrainData, center: Vector2i, target_height: int) -> void:
+	var brush_cells := get_brush_cells(center, data)
+
+	if brush_cells.is_empty():
+		return
+
+	# Collect cells that need to be changed
+	var changes: Array[Dictionary] = []
+	for cell in brush_cells:
+		var old_corners := data.get_top_corners(cell.x, cell.y)
+		var new_corners: Array[int] = [target_height, target_height, target_height, target_height]
+
+		# Check if there's actually a change
+		if old_corners[0] != target_height or old_corners[1] != target_height or \
+		   old_corners[2] != target_height or old_corners[3] != target_height:
+			changes.append({
+				"x": cell.x,
+				"z": cell.y,
+				"old": old_corners,
+				"new": new_corners
+			})
+
+	if changes.is_empty():
+		return
+
+	# Create single undo action for all cells
+	undo_redo.create_action("Flatten Terrain")
+	for change in changes:
+		undo_redo.add_do_method(data, "set_top_corners", change.x, change.z, change.new)
+		undo_redo.add_undo_method(data, "set_top_corners", change.x, change.z, change.old)
+	undo_redo.commit_action()
 
 
 func _flip_diagonal_brush_area(data: TerrainData, center: Vector2i) -> void:
@@ -686,6 +732,16 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 		for cell in brush_cells:
 			_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, Color.ORANGE)
 			_draw_diagonal_indicator(overlay, camera, terrain, data, cell)
+		return
+
+	# Flatten tool: highlight brush area with corner indicator
+	if current_tool == Tool.FLATTEN:
+		var color := Color.MAGENTA
+		for cell in brush_cells:
+			_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, color)
+		# Show corner indicator on hovered cell if near a corner
+		if _hover_mode == HoverMode.CORNER and _hovered_corner >= 0:
+			_draw_corner_highlight(overlay, camera, terrain, data, display_cell, _hovered_corner, Color.WHITE)
 		return
 
 	# Sculpt tool: draw cell/corner highlight

@@ -50,6 +50,7 @@ func _setup_tool_buttons() -> void:
 		TerrainEditor.Tool.SCULPT: %SculptButton,
 		TerrainEditor.Tool.PAINT: %PaintButton,
 		TerrainEditor.Tool.FLIP_DIAGONAL: %FlipDiagonalButton,
+		TerrainEditor.Tool.FLATTEN: %FlattenButton,
 	}
 
 	for tool_type in _tool_buttons:
