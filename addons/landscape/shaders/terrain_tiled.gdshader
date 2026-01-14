@@ -23,9 +23,6 @@ uniform int atlas_rows = 4;
 uniform float roughness : hint_range(0.0, 1.0) = 0.8;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
 
-// Slope threshold for top vs wall detection
-uniform float slope_threshold : hint_range(0.0, 1.0) = 0.7;
-
 // Selection highlight (kept from original shader)
 uniform vec2 selected_cell = vec2(-1.0, -1.0);
 uniform int selected_corner = -1;
@@ -36,10 +33,14 @@ uniform float corner_highlight_size : hint_range(0.2, 0.7) = 0.5;
 
 varying vec3 world_position;
 varying vec3 local_position;
+varying flat int surface_type;
 
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	local_position = VERTEX;
+	// Decode surface type from vertex color (R channel: 0-5 normalized to 0-1)
+	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor
+	surface_type = int(round(COLOR.r * 5.0));
 }
 
 // Get tile data from data texture
@@ -97,35 +98,10 @@ vec2 get_atlas_uv(int tile_index, vec2 local_uv) {
 	return tile_origin + local_uv * tile_size;
 }
 
-// Detect surface type from face normal
-// Returns: 0=top, 1=north, 2=east, 3=south, 4=west, -1=bottom (floor)
-int detect_surface(vec3 normal) {
-	float up_dot = abs(normal.y);
-
-	// Check if horizontal surface (top/bottom)
-	if (up_dot > slope_threshold) {
-		// Distinguish between top (facing up) and bottom/floor (facing down)
-		// Note: cross(dFdx, dFdy) gives normal pointing toward camera, so top surfaces
-		// when viewed from above have negative Y in the computed normal
-		return normal.y < 0.0 ? 0 : -1; // Top = toward camera from above, Floor = away
-	}
-
-	// Wall surface - determine direction
-	// Note: cross(dFdx, dFdy) gives normal pointing toward camera, which is opposite
-	// to the surface normal, so we flip the comparisons
-	vec3 abs_normal = abs(normal);
-	if (abs_normal.z > abs_normal.x) {
-		// North or South (flipped because normal points toward camera)
-		return normal.z > 0.0 ? 1 : 3; // North = -Z surface, South = +Z surface
-	} else {
-		// East or West (flipped because normal points toward camera)
-		return normal.x < 0.0 ? 2 : 4; // East = +X surface, West = -X surface
-	}
-}
-
 // Get local UV coordinates within a cell based on surface type
+// Surface types: 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor
 vec2 get_surface_uv(vec3 pos, int surface) {
-	if (surface == 0 || surface == -1) {
+	if (surface == 0 || surface == 5) {
 		// Top/floor surface - use XZ plane
 		return fract(pos.xz / cell_size);
 	} else if (surface == 1 || surface == 3) {
@@ -138,11 +114,9 @@ vec2 get_surface_uv(vec3 pos, int surface) {
 }
 
 void fragment() {
-	// Compute flat face normal from screen-space derivatives
-	vec3 face_normal = normalize(cross(dFdx(world_position), dFdy(world_position)));
-
-	// Detect surface type first
-	int surface = detect_surface(face_normal);
+	// Use surface type from vertex color (set by mesh builder)
+	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor
+	int surface = surface_type;
 
 	// Adjust position for wall surfaces to get correct cell
 	// Walls are on cell boundaries, so we offset slightly into the correct cell
@@ -167,8 +141,8 @@ void fragment() {
 	bool flip_h = false;
 	bool flip_v = false;
 
-	// Get tile data for non-floor surfaces
-	if (surface >= 0) {
+	// Get tile data for non-floor surfaces (floor = 5)
+	if (surface < 5) {
 		ivec4 tile_info = get_tile_data(cell, surface);
 		tile_index = tile_info.x;
 		rotation = tile_info.y;
@@ -198,7 +172,7 @@ void fragment() {
 	}
 
 	// Selection highlight (on top surfaces only)
-	bool is_top_face = abs(face_normal.y) > 0.5;
+	bool is_top_face = surface == 0;
 	if (selected_cell.x >= 0.0 && is_top_face) {
 		vec2 cell_min = selected_cell * cell_size;
 		vec2 cell_max = cell_min + vec2(cell_size);

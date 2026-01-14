@@ -2,6 +2,14 @@
 class_name TerrainMeshBuilder
 extends RefCounted
 
+# Surface type constants for vertex color encoding
+const SURFACE_TOP := 0
+const SURFACE_NORTH := 1
+const SURFACE_EAST := 2
+const SURFACE_SOUTH := 3
+const SURFACE_WEST := 4
+const SURFACE_FLOOR := 5
+
 var _terrain_data: TerrainData
 var _st: SurfaceTool
 
@@ -71,12 +79,12 @@ func _add_top_face(corners: Array[Vector3], x: int, z: int) -> void:
 
 	if use_nw_se_diagonal:
 		# NW-SE diagonal
-		_add_triangle(nw, ne, se, uv_nw, uv_ne, uv_se)
-		_add_triangle(nw, se, sw, uv_nw, uv_se, uv_sw)
+		_add_triangle(nw, ne, se, uv_nw, uv_ne, uv_se, SURFACE_TOP)
+		_add_triangle(nw, se, sw, uv_nw, uv_se, uv_sw, SURFACE_TOP)
 	else:
 		# NE-SW diagonal
-		_add_triangle(nw, ne, sw, uv_nw, uv_ne, uv_sw)
-		_add_triangle(ne, se, sw, uv_ne, uv_se, uv_sw)
+		_add_triangle(nw, ne, sw, uv_nw, uv_ne, uv_sw, SURFACE_TOP)
+		_add_triangle(ne, se, sw, uv_ne, uv_se, uv_sw, SURFACE_TOP)
 
 
 func _add_floor_face(corners: Array[Vector3], x: int, z: int) -> void:
@@ -101,11 +109,11 @@ func _add_floor_face(corners: Array[Vector3], x: int, z: int) -> void:
 		use_nw_se_diagonal = not use_nw_se_diagonal
 
 	if use_nw_se_diagonal:
-		_add_triangle(nw, se, ne, uv_nw, uv_se, uv_ne)
-		_add_triangle(nw, sw, se, uv_nw, uv_sw, uv_se)
+		_add_triangle(nw, se, ne, uv_nw, uv_se, uv_ne, SURFACE_FLOOR)
+		_add_triangle(nw, sw, se, uv_nw, uv_sw, uv_se, SURFACE_FLOOR)
 	else:
-		_add_triangle(nw, sw, ne, uv_nw, uv_sw, uv_ne)
-		_add_triangle(ne, sw, se, uv_ne, uv_sw, uv_se)
+		_add_triangle(nw, sw, ne, uv_nw, uv_sw, uv_ne, SURFACE_FLOOR)
+		_add_triangle(ne, sw, se, uv_ne, uv_sw, uv_se, SURFACE_FLOOR)
 
 
 func _add_walls(x: int, z: int, top_corners: Array[Vector3], floor_corners: Array[Vector3]) -> void:
@@ -140,11 +148,11 @@ func _add_wall_north(x: int, z: int, top: Array[Vector3], floor: Array[Vector3])
 		# Wall needed if our top is higher than neighbor's top
 		_add_wall_quad_if_needed(
 			top_nw, top_ne, neighbor_sw, neighbor_se,
-			floor_nw, floor_ne, true
+			floor_nw, floor_ne, SURFACE_NORTH
 		)
 	else:
 		# Outer edge - wall from top to floor
-		_add_wall_quad(top_ne, top_nw, floor_ne, floor_nw)
+		_add_wall_quad(top_ne, top_nw, floor_ne, floor_nw, SURFACE_NORTH)
 
 
 func _add_wall_east(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -161,10 +169,10 @@ func _add_wall_east(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) 
 
 		_add_wall_quad_if_needed(
 			top_ne, top_se, neighbor_nw, neighbor_sw,
-			floor_ne, floor_se, true
+			floor_ne, floor_se, SURFACE_EAST
 		)
 	else:
-		_add_wall_quad(top_se, top_ne, floor_se, floor_ne)
+		_add_wall_quad(top_se, top_ne, floor_se, floor_ne, SURFACE_EAST)
 
 
 func _add_wall_south(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -181,10 +189,10 @@ func _add_wall_south(x: int, z: int, top: Array[Vector3], floor: Array[Vector3])
 
 		_add_wall_quad_if_needed(
 			top_se, top_sw, neighbor_ne, neighbor_nw,
-			floor_se, floor_sw, true
+			floor_se, floor_sw, SURFACE_SOUTH
 		)
 	else:
-		_add_wall_quad(top_sw, top_se, floor_sw, floor_se)
+		_add_wall_quad(top_sw, top_se, floor_sw, floor_se, SURFACE_SOUTH)
 
 
 func _add_wall_west(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -201,17 +209,17 @@ func _add_wall_west(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) 
 
 		_add_wall_quad_if_needed(
 			top_sw, top_nw, neighbor_se, neighbor_ne,
-			floor_sw, floor_nw, true
+			floor_sw, floor_nw, SURFACE_WEST
 		)
 	else:
-		_add_wall_quad(top_nw, top_sw, floor_nw, floor_sw)
+		_add_wall_quad(top_nw, top_sw, floor_nw, floor_sw, SURFACE_WEST)
 
 
 func _add_wall_quad_if_needed(
 	our_top1: Vector3, our_top2: Vector3,
 	neighbor_top1: Vector3, neighbor_top2: Vector3,
 	our_floor1: Vector3, our_floor2: Vector3,
-	check_height: bool
+	surface_type: int
 ) -> void:
 	# Generate wall segments where our top is higher than neighbor's top
 	# This creates stepped walls for height differences
@@ -223,10 +231,10 @@ func _add_wall_quad_if_needed(
 	if our_top1.y > wall_bottom1 or our_top2.y > wall_bottom2:
 		var bottom1 := Vector3(our_top1.x, wall_bottom1, our_top1.z)
 		var bottom2 := Vector3(our_top2.x, wall_bottom2, our_top2.z)
-		_add_wall_quad(our_top1, our_top2, bottom1, bottom2)
+		_add_wall_quad(our_top1, our_top2, bottom1, bottom2, surface_type)
 
 
-func _add_wall_quad(top1: Vector3, top2: Vector3, bottom1: Vector3, bottom2: Vector3) -> void:
+func _add_wall_quad(top1: Vector3, top2: Vector3, bottom1: Vector3, bottom2: Vector3, surface_type: int = SURFACE_NORTH) -> void:
 	# Skip degenerate walls
 	if top1.y <= bottom1.y and top2.y <= bottom2.y:
 		return
@@ -239,14 +247,19 @@ func _add_wall_quad(top1: Vector3, top2: Vector3, bottom1: Vector3, bottom2: Vec
 	var uv_bottom2 := Vector2(1.0, bottom2.y * uv_scale)
 
 	# Two triangles for quad - reversed winding for outward facing
-	_add_triangle(top1, bottom2, top2, uv_top1, uv_bottom2, uv_top2)
-	_add_triangle(top1, bottom1, bottom2, uv_top1, uv_bottom1, uv_bottom2)
+	_add_triangle(top1, bottom2, top2, uv_top1, uv_bottom2, uv_top2, surface_type)
+	_add_triangle(top1, bottom1, bottom2, uv_top1, uv_bottom1, uv_bottom2, surface_type)
 
 
-func _add_triangle(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2) -> void:
+func _add_triangle(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2, surface_type: int = SURFACE_TOP) -> void:
+	# Encode surface type in vertex color (R channel: 0-5 normalized to 0-1)
+	var surface_color := Color(float(surface_type) / 5.0, 0.0, 0.0, 1.0)
+	_st.set_color(surface_color)
 	_st.set_uv(uv1)
 	_st.add_vertex(v1)
+	_st.set_color(surface_color)
 	_st.set_uv(uv2)
 	_st.add_vertex(v2)
+	_st.set_color(surface_color)
 	_st.set_uv(uv3)
 	_st.add_vertex(v3)
