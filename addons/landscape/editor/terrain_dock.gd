@@ -16,13 +16,11 @@ var terrain_editor = null:
 var terrain = null:
 	set(value):
 		terrain = value
-		_rebuild_tile_palette()
+		_update_tile_palette()
 
 var _current_cell: Vector2i = Vector2i(-1, -1)
 var _current_corner: int = -1
 var _current_mode: int = 0
-var _tile_buttons: Array[TextureRect] = []
-var _tile_zoom: int = 5  # Zoom level index, default 5 (96px)
 
 @onready var _tool_buttons: Dictionary = {}
 @onready var _status_label: Label = %StatusLabel
@@ -35,8 +33,7 @@ var _tile_zoom: int = 5  # Zoom level index, default 5 (96px)
 @onready var _flip_h_button: Button = %FlipHButton
 @onready var _flip_v_button: Button = %FlipVButton
 @onready var _rotation_label: Label = %RotationLabel
-@onready var _tile_palette_grid: GridContainer = %TilePaletteGrid
-@onready var _tile_palette_scroll: ScrollContainer = %TilePaletteScroll
+@onready var _tile_palette: TilePalette = %TilePalette
 @onready var _generate_placeholders_button: Button = %GeneratePlaceholdersButton
 @onready var _zoom_in_button: Button = %ZoomInButton
 @onready var _zoom_out_button: Button = %ZoomOutButton
@@ -49,8 +46,8 @@ func _ready() -> void:
 	_setup_paint_controls()
 	_update_button_states()
 
-	if _tile_palette_scroll:
-		_tile_palette_scroll.resized.connect(_on_tile_palette_resized)
+	if _tile_palette:
+		_tile_palette.tile_selected.connect(_on_tile_selected)
 
 
 func _setup_tool_buttons() -> void:
@@ -117,11 +114,6 @@ func _setup_paint_controls() -> void:
 	if _zoom_out_button:
 		_zoom_out_button.pressed.connect(_on_zoom_out)
 
-	# Remove spacing from tile grid
-	if _tile_palette_grid:
-		_tile_palette_grid.add_theme_constant_override("h_separation", 0)
-		_tile_palette_grid.add_theme_constant_override("v_separation", 0)
-
 
 func _on_tool_button_pressed(tool: TerrainEditor.Tool) -> void:
 	if terrain_editor:
@@ -181,8 +173,8 @@ func _on_generate_placeholders() -> void:
 	var tile_set := PlaceholderTiles.create_terrain_tileset()
 	landscape.tile_set = tile_set
 
-	# Rebuild the tile palette
-	_rebuild_tile_palette()
+	# Update the tile palette
+	_update_tile_palette()
 
 
 func _update_paint_section_visibility() -> void:
@@ -213,125 +205,30 @@ func _update_paint_controls() -> void:
 
 
 func _update_tile_selection() -> void:
-	if not terrain_editor:
+	if not terrain_editor or not _tile_palette:
 		return
-
-	var selected_tile: int = terrain_editor.current_paint_tile
-	for i in _tile_buttons.size():
-		var tile_rect := _tile_buttons[i]
-		# Visual feedback for selected tile
-		if i == selected_tile:
-			tile_rect.modulate = Color(1.5, 1.5, 1.5)
-		else:
-			tile_rect.modulate = Color.WHITE
-
-
-func _on_tile_palette_resized() -> void:
-	_update_tile_sizes()
-
-
-const TILE_ZOOM_SIZES := [16, 24, 32, 48, 64, 96, 128, 192, 256]
+	_tile_palette.selected_tile = terrain_editor.current_paint_tile
 
 
 func _on_zoom_in() -> void:
-	_tile_zoom = mini(_tile_zoom + 1, TILE_ZOOM_SIZES.size() - 1)
-	_update_tile_sizes()
+	if _tile_palette:
+		_tile_palette.zoom_in()
 
 
 func _on_zoom_out() -> void:
-	_tile_zoom = maxi(_tile_zoom - 1, 0)
-	_update_tile_sizes()
+	if _tile_palette:
+		_tile_palette.zoom_out()
 
 
-func _get_zoom_tile_size() -> int:
-	return TILE_ZOOM_SIZES[_tile_zoom]
-
-
-func _get_tile_columns() -> int:
-	if not _tile_palette_scroll:
-		return 4
-
-	var available_width := _tile_palette_scroll.size.x
-	var tile_size := _get_zoom_tile_size()
-	var columns := int(available_width / tile_size)
-	return maxi(1, columns)
-
-
-func _update_tile_sizes() -> void:
-	if not _tile_palette_grid or _tile_buttons.is_empty():
+func _update_tile_palette() -> void:
+	if not _tile_palette:
 		return
 
-	var columns := _get_tile_columns()
-	_tile_palette_grid.columns = columns
-
-	var tile_size := _get_zoom_tile_size()
-	for tile_rect in _tile_buttons:
-		tile_rect.custom_minimum_size = Vector2(tile_size, tile_size)
-
-
-func _rebuild_tile_palette() -> void:
-	if not _tile_palette_grid:
-		return
-
-	# Clear existing tiles
-	for tile_rect in _tile_buttons:
-		tile_rect.queue_free()
-	_tile_buttons.clear()
-
-	# Get tile set from terrain
 	var landscape := terrain as LandscapeTerrain
-	if not landscape or not landscape.tile_set or not landscape.tile_set.atlas_texture:
-		return
-
-	var tile_set := landscape.tile_set
-	var tile_count := tile_set.get_tile_count()
-
-	if tile_count == 0:
-		return
-
-	# Calculate columns based on available width
-	var columns := _get_tile_columns()
-	_tile_palette_grid.columns = columns
-
-	var tile_size := _get_zoom_tile_size()
-
-	for i in tile_count:
-		var tile_rect := TextureRect.new()
-		tile_rect.custom_minimum_size = Vector2(tile_size, tile_size)
-		tile_rect.stretch_mode = TextureRect.STRETCH_SCALE
-		tile_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		tile_rect.tooltip_text = "Tile %d" % i
-
-		# Create atlas texture
-		var atlas_tex := AtlasTexture.new()
-		atlas_tex.atlas = tile_set.atlas_texture
-		var uv_rect := tile_set.get_tile_uv_rect(i)
-		var tex_size := tile_set.atlas_texture.get_size()
-		atlas_tex.region = Rect2(
-			uv_rect.position * tex_size,
-			uv_rect.size * tex_size
-		)
-
-		tile_rect.texture = atlas_tex
-
-		# Use nearest-neighbor filtering for pixel art
-		tile_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-
-		# Handle click via gui_input
-		tile_rect.gui_input.connect(_on_tile_gui_input.bind(i))
-		tile_rect.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-
-		_tile_palette_grid.add_child(tile_rect)
-		_tile_buttons.append(tile_rect)
-
-	_update_tile_selection()
-
-
-func _on_tile_gui_input(event: InputEvent, tile_index: int) -> void:
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-			_on_tile_selected(tile_index)
+	if landscape and landscape.tile_set:
+		_tile_palette.tile_set = landscape.tile_set
+	else:
+		_tile_palette.tile_set = null
 
 
 func _on_hover_changed(cell: Vector2i, corner: int, mode: int) -> void:

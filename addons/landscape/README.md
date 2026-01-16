@@ -208,7 +208,7 @@ PBR shader with atlas-based tile texturing:
 - [x] Tile rotation (0°/90°/180°/270°) and flip (H/V)
 - [x] Overlay-based selection highlight (cell and corner modes)
 - [x] Sidebar status display (cell, corner, height, surface)
-- [x] Tile palette UI with zoomable seamless tiles
+- [x] Tile palette UI with pan/zoom canvas (like TileMapLayer editor)
 - [x] Placeholder tile generator for testing
 - [x] Undo/redo support
 - [x] Collision generation

@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://cqf8x7kv3vxgm"]
+[gd_scene load_steps=3 format=3 uid="uid://cqf8x7kv3vxgm"]
 
 [ext_resource type="Script" path="res://addons/landscape/editor/terrain_dock.gd" id="1_dock"]
+[ext_resource type="Script" path="res://addons/landscape/editor/tile_palette.gd" id="2_palette"]
 
 [node name="TerrainDock" type="Control"]
 anchors_preset = 15
@@ -181,16 +182,12 @@ layout_mode = 2
 text = "Generate Placeholder Tiles"
 tooltip_text = "Create a 4x4 placeholder tileset and assign it to the terrain"
 
-[node name="TilePaletteScroll" type="ScrollContainer" parent="VBoxContainer/PaintSection"]
+[node name="TilePalette" type="Control" parent="VBoxContainer/PaintSection"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-
-[node name="TilePaletteGrid" type="GridContainer" parent="VBoxContainer/PaintSection/TilePaletteScroll"]
-unique_name_in_owner = true
-layout_mode = 2
-columns = 4
+script = ExtResource("2_palette")
 
 [node name="Spacer" type="Control" parent="VBoxContainer"]
 unique_name_in_owner = true

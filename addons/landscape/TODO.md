@@ -19,7 +19,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
-- [x] **Improved tile palette UI** - Zoomable seamless tiles (+/- buttons), scrollable panel, dynamic columns
+- [x] **TileMapLayer-style tile palette** - Pan/zoom canvas with fixed tile positions, trackpad support (two-finger pan, pinch zoom, Ctrl+scroll zoom)
 - [x] **Flatten tool** - Set cells to a target height (click near corner for its height, center for average)
 - [x] **Flip diagonal tool** - Toggle the diagonal triangulation of cells (useful for saddle-shaped terrain)
 - [x] **Brush size** - Slider to adjust brush size (1x1 to 9x9, including even sizes), affects sculpt and paint tools
@@ -29,7 +29,7 @@
 - [x] **Tiled shader** - PBR shader with per-surface tile data texture
 - [x] **Surface detection** - Raycast normal determines hovered surface
 - [x] **Overlay highlighting** - Replaced shader-based selection with overlay polygons
-- [x] **Tile palette UI** - Zoomable seamless tiles for pixel art
+- [x] **Tile palette UI** - Pan/zoom canvas like TileMapLayer editor
 - [x] **Placeholder tiles** - Generate colored test tileset
 - [x] **Status bar surface display** - Shows hovered surface name in paint mode
 - [x] **Pixel art shader** - Flat shading, nearest filtering, checkerboard with 6 direction colors
@@ -136,12 +136,12 @@
   - White dot indicates which corner is being used for target height
   - Respects brush size for multi-cell operations
 
-### 2025-01-16 - Improved Tile Palette UI
-- Redesigned tile palette for better usability:
-  - Switched from Button to TextureRect for seamless tile display
-  - Added zoom in/out buttons (+/-) with 9 zoom levels (16-256px)
-  - Default tile size set to 96px
-  - Removed all spacing between tiles (edge-to-edge display)
-  - Scrollable panel with both horizontal and vertical scrollbars
-  - Dynamic column calculation based on available width
-  - Hidden spacer when paint section visible for more vertical space
+### 2025-01-16 - TileMapLayer-style Tile Palette
+- Redesigned tile palette to match Godot's TileMapLayer editor:
+  - New TilePalette custom Control with _draw() rendering
+  - Tiles at fixed grid positions (no reflow)
+  - Pan: two-finger scroll, right-click drag, scroll wheel
+  - Zoom: pinch gesture, Ctrl/Cmd+scroll, +/- buttons
+  - Zoom centered on cursor position
+  - Selection highlight with fill and outline
+  - Efficient tile culling for large tilesets
