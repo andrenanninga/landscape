@@ -19,6 +19,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Improved tile palette UI** - Zoomable seamless tiles (+/- buttons), scrollable panel, dynamic columns
 - [x] **Flatten tool** - Set cells to a target height (click near corner for its height, center for average)
 - [x] **Flip diagonal tool** - Toggle the diagonal triangulation of cells (useful for saddle-shaped terrain)
 - [x] **Brush size** - Slider to adjust brush size (1x1 to 9x9, including even sizes), affects sculpt and paint tools
@@ -28,7 +29,7 @@
 - [x] **Tiled shader** - PBR shader with per-surface tile data texture
 - [x] **Surface detection** - Raycast normal determines hovered surface
 - [x] **Overlay highlighting** - Replaced shader-based selection with overlay polygons
-- [x] **Tile palette UI** - Large buttons (96x96) for pixel art readability
+- [x] **Tile palette UI** - Zoomable seamless tiles for pixel art
 - [x] **Placeholder tiles** - Generate colored test tileset
 - [x] **Status bar surface display** - Shows hovered surface name in paint mode
 - [x] **Pixel art shader** - Flat shading, nearest filtering, checkerboard with 6 direction colors
@@ -106,7 +107,7 @@
   - draw_line for cell/corner borders
   - Works for all surfaces (top + walls)
 - Updated dock UI:
-  - Tile palette with large buttons (96x96) for pixel art
+  - Tile palette with zoomable seamless tiles
   - Rotation/flip controls
   - Surface selector dropdown
   - Status bar moved to bottom showing surface name
@@ -134,3 +135,13 @@
   - Magenta highlight shows affected area
   - White dot indicates which corner is being used for target height
   - Respects brush size for multi-cell operations
+
+### 2025-01-16 - Improved Tile Palette UI
+- Redesigned tile palette for better usability:
+  - Switched from Button to TextureRect for seamless tile display
+  - Added zoom in/out buttons (+/-) with 9 zoom levels (16-256px)
+  - Default tile size set to 96px
+  - Removed all spacing between tiles (edge-to-edge display)
+  - Scrollable panel with both horizontal and vertical scrollbars
+  - Dynamic column calculation based on available width
+  - Hidden spacer when paint section visible for more vertical space

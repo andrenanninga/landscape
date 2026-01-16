@@ -21,7 +21,8 @@ var terrain = null:
 var _current_cell: Vector2i = Vector2i(-1, -1)
 var _current_corner: int = -1
 var _current_mode: int = 0
-var _tile_buttons: Array[Button] = []
+var _tile_buttons: Array[TextureRect] = []
+var _tile_zoom: int = 5  # Zoom level index, default 5 (96px)
 
 @onready var _tool_buttons: Dictionary = {}
 @onready var _status_label: Label = %StatusLabel
@@ -35,7 +36,11 @@ var _tile_buttons: Array[Button] = []
 @onready var _flip_v_button: Button = %FlipVButton
 @onready var _rotation_label: Label = %RotationLabel
 @onready var _tile_palette_grid: GridContainer = %TilePaletteGrid
+@onready var _tile_palette_scroll: ScrollContainer = %TilePaletteScroll
 @onready var _generate_placeholders_button: Button = %GeneratePlaceholdersButton
+@onready var _zoom_in_button: Button = %ZoomInButton
+@onready var _zoom_out_button: Button = %ZoomOutButton
+@onready var _spacer: Control = %Spacer
 
 
 func _ready() -> void:
@@ -43,6 +48,9 @@ func _ready() -> void:
 	_setup_brush_controls()
 	_setup_paint_controls()
 	_update_button_states()
+
+	if _tile_palette_scroll:
+		_tile_palette_scroll.resized.connect(_on_tile_palette_resized)
 
 
 func _setup_tool_buttons() -> void:
@@ -102,6 +110,17 @@ func _setup_paint_controls() -> void:
 
 	if _generate_placeholders_button:
 		_generate_placeholders_button.pressed.connect(_on_generate_placeholders)
+
+	if _zoom_in_button:
+		_zoom_in_button.pressed.connect(_on_zoom_in)
+
+	if _zoom_out_button:
+		_zoom_out_button.pressed.connect(_on_zoom_out)
+
+	# Remove spacing from tile grid
+	if _tile_palette_grid:
+		_tile_palette_grid.add_theme_constant_override("h_separation", 0)
+		_tile_palette_grid.add_theme_constant_override("v_separation", 0)
 
 
 func _on_tool_button_pressed(tool: TerrainEditor.Tool) -> void:
@@ -167,8 +186,12 @@ func _on_generate_placeholders() -> void:
 
 
 func _update_paint_section_visibility() -> void:
+	var is_paint_mode: bool = terrain_editor != null and terrain_editor.current_tool == TerrainEditor.Tool.PAINT
 	if _paint_section:
-		_paint_section.visible = terrain_editor and terrain_editor.current_tool == TerrainEditor.Tool.PAINT
+		_paint_section.visible = is_paint_mode
+	if _spacer:
+		# Hide spacer when paint section is visible to give it more space
+		_spacer.visible = not is_paint_mode
 
 
 func _update_paint_controls() -> void:
@@ -195,21 +218,64 @@ func _update_tile_selection() -> void:
 
 	var selected_tile: int = terrain_editor.current_paint_tile
 	for i in _tile_buttons.size():
-		var button := _tile_buttons[i]
+		var tile_rect := _tile_buttons[i]
 		# Visual feedback for selected tile
 		if i == selected_tile:
-			button.modulate = Color(1.2, 1.2, 1.2)
+			tile_rect.modulate = Color(1.5, 1.5, 1.5)
 		else:
-			button.modulate = Color.WHITE
+			tile_rect.modulate = Color.WHITE
+
+
+func _on_tile_palette_resized() -> void:
+	_update_tile_sizes()
+
+
+const TILE_ZOOM_SIZES := [16, 24, 32, 48, 64, 96, 128, 192, 256]
+
+
+func _on_zoom_in() -> void:
+	_tile_zoom = mini(_tile_zoom + 1, TILE_ZOOM_SIZES.size() - 1)
+	_update_tile_sizes()
+
+
+func _on_zoom_out() -> void:
+	_tile_zoom = maxi(_tile_zoom - 1, 0)
+	_update_tile_sizes()
+
+
+func _get_zoom_tile_size() -> int:
+	return TILE_ZOOM_SIZES[_tile_zoom]
+
+
+func _get_tile_columns() -> int:
+	if not _tile_palette_scroll:
+		return 4
+
+	var available_width := _tile_palette_scroll.size.x
+	var tile_size := _get_zoom_tile_size()
+	var columns := int(available_width / tile_size)
+	return maxi(1, columns)
+
+
+func _update_tile_sizes() -> void:
+	if not _tile_palette_grid or _tile_buttons.is_empty():
+		return
+
+	var columns := _get_tile_columns()
+	_tile_palette_grid.columns = columns
+
+	var tile_size := _get_zoom_tile_size()
+	for tile_rect in _tile_buttons:
+		tile_rect.custom_minimum_size = Vector2(tile_size, tile_size)
 
 
 func _rebuild_tile_palette() -> void:
 	if not _tile_palette_grid:
 		return
 
-	# Clear existing buttons
-	for button in _tile_buttons:
-		button.queue_free()
+	# Clear existing tiles
+	for tile_rect in _tile_buttons:
+		tile_rect.queue_free()
 	_tile_buttons.clear()
 
 	# Get tile set from terrain
@@ -223,14 +289,20 @@ func _rebuild_tile_palette() -> void:
 	if tile_count == 0:
 		return
 
-	_tile_palette_grid.columns = tile_set.atlas_columns
+	# Calculate columns based on available width
+	var columns := _get_tile_columns()
+	_tile_palette_grid.columns = columns
+
+	var tile_size := _get_zoom_tile_size()
 
 	for i in tile_count:
-		var button := Button.new()
-		button.custom_minimum_size = Vector2(96, 96)
-		button.tooltip_text = "Tile %d" % i
+		var tile_rect := TextureRect.new()
+		tile_rect.custom_minimum_size = Vector2(tile_size, tile_size)
+		tile_rect.stretch_mode = TextureRect.STRETCH_SCALE
+		tile_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tile_rect.tooltip_text = "Tile %d" % i
 
-		# Create atlas texture for button icon
+		# Create atlas texture
 		var atlas_tex := AtlasTexture.new()
 		atlas_tex.atlas = tile_set.atlas_texture
 		var uv_rect := tile_set.get_tile_uv_rect(i)
@@ -240,18 +312,26 @@ func _rebuild_tile_palette() -> void:
 			uv_rect.size * tex_size
 		)
 
-		button.icon = atlas_tex
-		button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		button.expand_icon = true
+		tile_rect.texture = atlas_tex
 
 		# Use nearest-neighbor filtering for pixel art
-		button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		tile_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
-		button.pressed.connect(_on_tile_selected.bind(i))
-		_tile_palette_grid.add_child(button)
-		_tile_buttons.append(button)
+		# Handle click via gui_input
+		tile_rect.gui_input.connect(_on_tile_gui_input.bind(i))
+		tile_rect.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+
+		_tile_palette_grid.add_child(tile_rect)
+		_tile_buttons.append(tile_rect)
 
 	_update_tile_selection()
+
+
+func _on_tile_gui_input(event: InputEvent, tile_index: int) -> void:
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+			_on_tile_selected(tile_index)
 
 
 func _on_hover_changed(cell: Vector2i, corner: int, mode: int) -> void:
