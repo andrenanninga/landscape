@@ -158,6 +158,7 @@ PBR shader with atlas-based tile texturing:
 - **Tile transformations** - Rotation (0°/90°/180°/270°) and flip (H/V)
 - **Tile data texture** - GPU-side storage of per-cell tile info
 - **Surface detection** - Automatic top/wall detection from face normals
+- **Paint preview** - Shader-based preview for accurate wall texture repeating
 - **Selection highlight** - Visual feedback for hovered cell (top faces)
 
 ## Usage
@@ -176,8 +177,12 @@ PBR shader with atlas-based tile texturing:
    - Click "Generate Placeholder Tiles" to create a test tileset
    - Select a tile from the palette
    - Click any surface (top, north, south, east, west) to paint
-   - Use rotation buttons (↺ ↻) to rotate the tile
-   - Use flip buttons (⇆ ⇅) to flip horizontally/vertically
+   - Use rotation buttons (↺ ↻) or keyboard shortcuts to transform tiles:
+     - **Z**: Rotate clockwise
+     - **Shift+Z**: Rotate counter-clockwise
+     - **X**: Flip horizontal
+     - **Y**: Flip vertical
+   - Tile preview shows exactly how the painted result will look (including on walls)
    - Status bar shows which surface is being hovered
 6. Use the **Flip** tool:
    - Click a cell to toggle its diagonal triangulation
@@ -205,7 +210,8 @@ PBR shader with atlas-based tile texturing:
 - [x] Pixel art shader with flat shading and checkerboard pattern
 - [x] Tiled texture shader with atlas support
 - [x] Paint tool with per-surface tiles (top + 4 walls)
-- [x] Tile rotation (0°/90°/180°/270°) and flip (H/V)
+- [x] Tile rotation (0°/90°/180°/270°) and flip (H/V) with keyboard shortcuts (X, Y, Z)
+- [x] Shader-based paint preview for accurate wall texture display
 - [x] Overlay-based selection highlight (cell and corner modes)
 - [x] Sidebar status display (cell, corner, height, surface)
 - [x] Tile palette UI with pan/zoom canvas (like TileMapLayer editor)

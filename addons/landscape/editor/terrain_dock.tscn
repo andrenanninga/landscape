@@ -122,27 +122,27 @@ layout_mode = 2
 [node name="RotateCCWButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "Rotate Counter-Clockwise (Shift+R)"
+tooltip_text = "Rotate Counter-Clockwise (Shift+Z)"
 text = "↺"
 
 [node name="RotateCWButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "Rotate Clockwise (R)"
+tooltip_text = "Rotate Clockwise (Z)"
 text = "↻"
 
 [node name="FlipHButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
 unique_name_in_owner = true
 layout_mode = 2
 toggle_mode = true
-tooltip_text = "Flip Horizontal (H)"
+tooltip_text = "Flip Horizontal (X)"
 text = "⇆"
 
 [node name="FlipVButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
 unique_name_in_owner = true
 layout_mode = 2
 toggle_mode = true
-tooltip_text = "Flip Vertical (V)"
+tooltip_text = "Flip Vertical (Y)"
 text = "⇅"
 
 [node name="RotationLabel" type="Label" parent="VBoxContainer/PaintSection/TransformControls"]

@@ -26,6 +26,7 @@ var current_paint_tile: int = 0:
 	set(value):
 		current_paint_tile = value
 		paint_state_changed.emit()
+		_update_paint_preview()
 
 var current_paint_surface: TerrainData.Surface = TerrainData.Surface.TOP:
 	set(value):
@@ -36,16 +37,19 @@ var current_paint_rotation: TerrainData.Rotation = TerrainData.Rotation.ROT_0:
 	set(value):
 		current_paint_rotation = value
 		paint_state_changed.emit()
+		_update_paint_preview()
 
 var current_paint_flip_h: bool = false:
 	set(value):
 		current_paint_flip_h = value
 		paint_state_changed.emit()
+		_update_paint_preview()
 
 var current_paint_flip_v: bool = false:
 	set(value):
 		current_paint_flip_v = value
 		paint_state_changed.emit()
+		_update_paint_preview()
 
 # Brush size (1 = 1x1, 2 = 2x2, 3 = 3x3, etc.)
 var brush_size: int = 1:
@@ -98,6 +102,9 @@ func _clear_hover() -> void:
 		_hovered_corner = -1
 		_hover_mode = HoverMode.CELL
 		hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
+	# Clear shader-based paint preview
+	if _terrain:
+		_terrain.clear_paint_preview()
 
 
 func get_current_height() -> float:
@@ -132,6 +139,24 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 
 	if current_tool == Tool.NONE:
 		return false
+
+	# Handle keyboard shortcuts for paint tool (Tiled-style)
+	if current_tool == Tool.PAINT and event is InputEventKey:
+		var key := event as InputEventKey
+		if key.pressed and not key.echo:
+			match key.keycode:
+				KEY_X:
+					toggle_paint_flip_h()
+					return true
+				KEY_Y:
+					toggle_paint_flip_v()
+					return true
+				KEY_Z:
+					if key.shift_pressed:
+						rotate_paint_ccw()
+					else:
+						rotate_paint_cw()
+					return true
 
 	if event is InputEventMouseMotion:
 		var motion := event as InputEventMouseMotion
@@ -485,6 +510,16 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 		_hover_mode = HoverMode.CELL
 		if old_cell != _hovered_cell or old_surface != _hovered_surface:
 			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
+		# Update shader-based paint preview
+		if current_tool == Tool.PAINT and _terrain:
+			_terrain.set_paint_preview(
+				_hovered_cell,
+				_hovered_surface as int,
+				current_paint_tile,
+				current_paint_rotation as int,
+				current_paint_flip_h,
+				current_paint_flip_v
+			)
 		return
 
 	# Calculate position within cell to determine corner vs center (sculpt tool)
@@ -666,6 +701,19 @@ func _paint_cell(data: TerrainData, x: int, z: int, surface: TerrainData.Surface
 	return true
 
 
+func _update_paint_preview() -> void:
+	if current_tool != Tool.PAINT or not _terrain or _hovered_cell.x < 0:
+		return
+	_terrain.set_paint_preview(
+		_hovered_cell,
+		_hovered_surface as int,
+		current_paint_tile,
+		current_paint_rotation as int,
+		current_paint_flip_h,
+		current_paint_flip_v
+	)
+
+
 # Helper functions for paint tool rotation/flip
 func rotate_paint_cw() -> void:
 	current_paint_rotation = ((current_paint_rotation + 1) % 4) as TerrainData.Rotation
@@ -721,10 +769,10 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 	# Get all cells in brush area for display
 	var brush_cells := _drag_brush_cells if _is_dragging else get_brush_cells(display_cell, data)
 
-	# Paint tool: highlight the specific surface face for all brush cells
+	# Paint tool: show outline only (tile preview is done via shader)
 	if current_tool == Tool.PAINT:
 		for cell in brush_cells:
-			_draw_surface_highlight(overlay, camera, terrain, data, cell, _hovered_surface)
+			_draw_surface_outline(overlay, camera, terrain, data, cell, _hovered_surface)
 		return
 
 	# Flip diagonal tool: highlight top surface and show current diagonal
@@ -794,6 +842,103 @@ func _draw_surface_highlight(overlay: Control, camera: Camera3D, terrain: Landsc
 	var tri2 := PackedVector2Array([screen_points[0], screen_points[2], screen_points[3]])
 	overlay.draw_colored_polygon(tri1, fill_color)
 	overlay.draw_colored_polygon(tri2, fill_color)
+
+
+func _draw_surface_outline(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, surface: TerrainData.Surface, color: Color = Color.CYAN) -> void:
+	# Get surface corners in world space
+	var surface_corners := data.get_surface_world_corners(cell.x, cell.y, surface)
+
+	# Transform to screen space
+	var screen_points: Array[Vector2] = []
+	var any_behind := false
+	for corner in surface_corners:
+		var world_pos := terrain.to_global(corner)
+		if camera.is_position_behind(world_pos):
+			any_behind = true
+			break
+		screen_points.append(camera.unproject_position(world_pos))
+
+	if any_behind or screen_points.size() != 4:
+		return
+
+	# Draw outline only
+	var outline_color := color
+	outline_color.a = 0.9
+	for i in 4:
+		var next := (i + 1) % 4
+		overlay.draw_line(screen_points[i], screen_points[next], outline_color, 2.0)
+
+
+func _draw_tile_preview(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, surface: TerrainData.Surface) -> void:
+	# Get tileset
+	var tile_set := terrain.tile_set
+	if not tile_set or not tile_set.atlas_texture:
+		return
+
+	if current_paint_tile < 0 or current_paint_tile >= tile_set.get_tile_count():
+		return
+
+	# Get surface corners in world space
+	var surface_corners := data.get_surface_world_corners(cell.x, cell.y, surface)
+
+	# Transform to screen space
+	var screen_points: PackedVector2Array = []
+	for corner in surface_corners:
+		var world_pos := terrain.to_global(corner)
+		if camera.is_position_behind(world_pos):
+			return
+		screen_points.append(camera.unproject_position(world_pos))
+
+	if screen_points.size() != 4:
+		return
+
+	# Get tile UV rect (normalized 0-1)
+	var uv_rect := tile_set.get_tile_uv_rect(current_paint_tile)
+
+	# Base UVs for quad corners: NW, NE, SE, SW
+	var base_uvs: Array[Vector2] = [
+		uv_rect.position,                                          # NW (top-left)
+		Vector2(uv_rect.end.x, uv_rect.position.y),               # NE (top-right)
+		uv_rect.end,                                               # SE (bottom-right)
+		Vector2(uv_rect.position.x, uv_rect.end.y),               # SW (bottom-left)
+	]
+
+	# Apply rotation (rotate UV indices)
+	var rotation_offset := current_paint_rotation as int
+	var rotated_uvs: Array[Vector2] = []
+	for i in 4:
+		rotated_uvs.append(base_uvs[(i + rotation_offset) % 4])
+
+	# Apply flips
+	if current_paint_flip_h:
+		var temp := rotated_uvs[0]
+		rotated_uvs[0] = rotated_uvs[1]
+		rotated_uvs[1] = temp
+		temp = rotated_uvs[3]
+		rotated_uvs[3] = rotated_uvs[2]
+		rotated_uvs[2] = temp
+
+	if current_paint_flip_v:
+		var temp := rotated_uvs[0]
+		rotated_uvs[0] = rotated_uvs[3]
+		rotated_uvs[3] = temp
+		temp = rotated_uvs[1]
+		rotated_uvs[1] = rotated_uvs[2]
+		rotated_uvs[2] = temp
+
+	# Convert to PackedVector2Array for draw_polygon
+	var uvs := PackedVector2Array(rotated_uvs)
+
+	# Draw textured quad as two triangles
+	var colors := PackedColorArray([Color(1, 1, 1, 0.7), Color(1, 1, 1, 0.7), Color(1, 1, 1, 0.7)])
+
+	var tri1_points := PackedVector2Array([screen_points[0], screen_points[1], screen_points[2]])
+	var tri1_uvs := PackedVector2Array([uvs[0], uvs[1], uvs[2]])
+	overlay.draw_polygon(tri1_points, colors, tri1_uvs, tile_set.atlas_texture)
+
+	var tri2_points := PackedVector2Array([screen_points[0], screen_points[2], screen_points[3]])
+	var tri2_uvs := PackedVector2Array([uvs[0], uvs[2], uvs[3]])
+	overlay.draw_polygon(tri2_points, colors, tri2_uvs, tile_set.atlas_texture)
 
 
 func _draw_diagonal_indicator(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i) -> void:

@@ -19,6 +19,8 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Shader-based paint preview** - Tile preview renders through shader for correct wall texture repeating (replaces stretched overlay preview)
+- [x] **Paint tool keyboard shortcuts** - Tiled-style shortcuts: X (flip H), Y (flip V), Z (rotate CW), Shift+Z (rotate CCW)
 - [x] **TileMapLayer-style tile palette** - Pan/zoom canvas with fixed tile positions, trackpad support (two-finger pan, pinch zoom, Ctrl+scroll zoom)
 - [x] **Flatten tool** - Set cells to a target height (click near corner for its height, center for average)
 - [x] **Flip diagonal tool** - Toggle the diagonal triangulation of cells (useful for saddle-shaped terrain)
@@ -145,3 +147,15 @@
   - Zoom centered on cursor position
   - Selection highlight with fill and outline
   - Efficient tile culling for large tilesets
+
+### 2025-01-16 - Paint Tool Improvements
+- Added Tiled-style keyboard shortcuts for paint tool:
+  - X: Flip horizontal
+  - Y: Flip vertical
+  - Z: Rotate clockwise
+  - Shift+Z: Rotate counter-clockwise
+- Implemented shader-based paint preview:
+  - Added preview uniforms to terrain_tiled.gdshader
+  - Preview renders through same shader as final result
+  - Correctly shows repeating texture on tall walls (was stretching with overlay)
+  - Preview updates when changing tile, rotation, or flip settings

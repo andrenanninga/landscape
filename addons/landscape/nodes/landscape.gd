@@ -224,6 +224,23 @@ func clear_selection() -> void:
 		mat.set_shader_parameter("corner_mode", false)
 
 
+func set_paint_preview(cell: Vector2i, surface: int, tile: int, rotation: int, flip_h: bool, flip_v: bool) -> void:
+	var mat := material_override as ShaderMaterial
+	if mat:
+		mat.set_shader_parameter("preview_cell", cell)
+		mat.set_shader_parameter("preview_surface", surface)
+		mat.set_shader_parameter("preview_tile", tile)
+		mat.set_shader_parameter("preview_rotation", rotation)
+		mat.set_shader_parameter("preview_flip_h", flip_h)
+		mat.set_shader_parameter("preview_flip_v", flip_v)
+
+
+func clear_paint_preview() -> void:
+	var mat := material_override as ShaderMaterial
+	if mat:
+		mat.set_shader_parameter("preview_cell", Vector2i(-1, -1))
+
+
 # Helper to convert world position to nearest corner
 func world_to_corner(world_pos: Vector3) -> Vector3i:
 	var local_pos := to_local(world_pos)

@@ -31,6 +31,14 @@ uniform vec3 selection_color : source_color = vec3(1.0, 1.0, 1.0);
 uniform float selection_border_width : hint_range(0.01, 0.2) = 0.08;
 uniform float corner_highlight_size : hint_range(0.2, 0.7) = 0.5;
 
+// Paint preview - overrides tile data for preview cell
+uniform ivec2 preview_cell = ivec2(-1, -1);
+uniform int preview_surface = -1;
+uniform int preview_tile = -1;
+uniform int preview_rotation = 0;
+uniform bool preview_flip_h = false;
+uniform bool preview_flip_v = false;
+
 varying vec3 world_position;
 varying vec3 local_position;
 varying flat int surface_type;
@@ -141,13 +149,25 @@ void fragment() {
 	bool flip_h = false;
 	bool flip_v = false;
 
+	// Check if this is a preview cell/surface
+	bool is_preview = preview_cell.x >= 0 && cell == preview_cell && surface == preview_surface;
+
 	// Get tile data for non-floor surfaces (floor = 5)
 	if (surface < 5) {
-		ivec4 tile_info = get_tile_data(cell, surface);
-		tile_index = tile_info.x;
-		rotation = tile_info.y;
-		flip_h = tile_info.z != 0;
-		flip_v = tile_info.w != 0;
+		if (is_preview) {
+			// Use preview values
+			tile_index = preview_tile;
+			rotation = preview_rotation;
+			flip_h = preview_flip_h;
+			flip_v = preview_flip_v;
+		} else {
+			// Read from tile data texture
+			ivec4 tile_info = get_tile_data(cell, surface);
+			tile_index = tile_info.x;
+			rotation = tile_info.y;
+			flip_h = tile_info.z != 0;
+			flip_v = tile_info.w != 0;
+		}
 	}
 
 	// Get local UV within cell
