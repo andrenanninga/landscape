@@ -63,6 +63,7 @@ const CORNER_THRESHOLD := 0.45
 var _terrain: LandscapeTerrain
 var _hovered_cell: Vector2i = Vector2i(-1, -1)
 var _hovered_corner: int = -1
+var _brush_corner: int = -1  # Nearest corner for even brush sizes (0=NW, 1=NE, 2=SE, 3=SW)
 var _hover_mode: HoverMode = HoverMode.CELL
 var _hovered_surface: TerrainData.Surface = TerrainData.Surface.TOP
 var _last_camera: Camera3D
@@ -259,7 +260,7 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 	_drag_sticky_corners = _drag_original_corners.duplicate()
 
 	# Store original heights for all brush cells
-	_drag_brush_cells = get_brush_cells(_drag_cell, data)
+	_drag_brush_cells = get_brush_cells(_drag_cell, data, _brush_corner)
 	_drag_brush_original_corners.clear()
 	for cell in _drag_brush_cells:
 		var key := "%d,%d" % [cell.x, cell.y]
@@ -548,18 +549,7 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 
 	_hovered_cell = _terrain.world_to_cell(adjusted_pos)
 
-	# For paint and flip diagonal tools, we don't need corner detection
-	if current_tool == Tool.PAINT or current_tool == Tool.FLIP_DIAGONAL:
-		_hovered_corner = -1
-		_hover_mode = HoverMode.CELL
-		if old_cell != _hovered_cell or old_surface != _hovered_surface:
-			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
-		# Update buffer-based paint preview (hover preview, not during drag)
-		if current_tool == Tool.PAINT and _terrain and not _is_paint_dragging:
-			_update_hover_paint_preview()
-		return
-
-	# Calculate position within cell to determine corner vs center (sculpt tool)
+	# Calculate position within cell to determine nearest corner (for all tools)
 	var local_pos := _terrain.to_local(hit_pos)
 	var cell_size := _terrain.terrain_data.cell_size
 	var cell_local_x := local_pos.x - _hovered_cell.x * cell_size
@@ -577,7 +567,7 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 		Vector2(norm_x, norm_z - 1.0).length(),        # SW (0,1)
 	]
 
-	# Find closest corner
+	# Find closest corner (used by even brush sizes to center on corner)
 	var min_dist := corner_dists[0]
 	var closest_corner := 0
 	for i in range(1, 4):
@@ -585,6 +575,21 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 			min_dist = corner_dists[i]
 			closest_corner = i
 
+	# Store brush corner for even brush size centering
+	_brush_corner = closest_corner
+
+	# For paint and flip diagonal tools, we don't need corner hover mode
+	if current_tool == Tool.PAINT or current_tool == Tool.FLIP_DIAGONAL:
+		_hovered_corner = -1
+		_hover_mode = HoverMode.CELL
+		if old_cell != _hovered_cell or old_surface != _hovered_surface:
+			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
+		# Update buffer-based paint preview (hover preview, not during drag)
+		if current_tool == Tool.PAINT and _terrain and not _is_paint_dragging:
+			_update_hover_paint_preview()
+		return
+
+	# For sculpt/flatten tools, also track corner hover mode
 	_hovered_corner = closest_corner
 
 	# Determine mode based on distance to corner
@@ -641,7 +646,7 @@ func _raycast_terrain(origin: Vector3, direction: Vector3) -> Dictionary:
 
 
 func _flatten_brush_area(data: TerrainData, center: Vector2i, target_height: int) -> void:
-	var brush_cells := get_brush_cells(center, data)
+	var brush_cells := get_brush_cells(center, data, _brush_corner)
 
 	if brush_cells.is_empty():
 		return
@@ -674,7 +679,7 @@ func _flatten_brush_area(data: TerrainData, center: Vector2i, target_height: int
 
 
 func _flip_diagonal_brush_area(data: TerrainData, center: Vector2i) -> void:
-	var brush_cells := get_brush_cells(center, data)
+	var brush_cells := get_brush_cells(center, data, _brush_corner)
 
 	if brush_cells.is_empty():
 		return
@@ -705,7 +710,7 @@ func _update_hover_paint_preview() -> void:
 
 	# Build hover preview for entire brush area
 	var hover_preview: Dictionary = {}
-	var brush_cells := get_brush_cells(_hovered_cell, data)
+	var brush_cells := get_brush_cells(_hovered_cell, data, _brush_corner)
 	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
 
 	for cell in brush_cells:
@@ -716,7 +721,7 @@ func _update_hover_paint_preview() -> void:
 
 
 func _build_paint_preview(data: TerrainData, center: Vector2i, surface: TerrainData.Surface) -> bool:
-	var brush_cells := get_brush_cells(center, data)
+	var brush_cells := get_brush_cells(center, data, _brush_corner)
 	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
 
 	var any_added := false
@@ -763,18 +768,62 @@ func toggle_paint_flip_v() -> void:
 
 
 # Get all cells within the brush area centered on the given cell
-func get_brush_cells(center: Vector2i, data: TerrainData) -> Array[Vector2i]:
+# For even brush sizes with corner specified, centers around the corner point
+func get_brush_cells(center: Vector2i, data: TerrainData, corner: int = -1) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
-
-	# Calculate offset range based on brush size
-	# Odd sizes (1,3,5,7,9): centered, e.g. size 3 = -1 to +1
-	# Even sizes (2,4,6,8): offset toward negative, e.g. size 2 = -1 to 0, size 4 = -2 to +1
 	var half := brush_size / 2
-	var start := -half
-	var end := brush_size - half - 1
+	var is_even := brush_size % 2 == 0
 
-	for dz in range(start, end + 1):
-		for dx in range(start, end + 1):
+	var start_x: int
+	var end_x: int
+	var start_z: int
+	var end_z: int
+
+	# For odd sizes OR no corner info: use cell-centered logic
+	# For even sizes with corner: center around corner point
+	if is_even and corner >= 0:
+		# Corner-based offset for even brush sizes
+		# Corner 0 (NW): brush extends toward negative x and z
+		# Corner 1 (NE): brush extends toward positive x and negative z
+		# Corner 2 (SE): brush extends toward positive x and z
+		# Corner 3 (SW): brush extends toward negative x and positive z
+		match corner:
+			0:  # NW
+				start_x = -half
+				end_x = half - 1
+				start_z = -half
+				end_z = half - 1
+			1:  # NE
+				start_x = 1 - half
+				end_x = half
+				start_z = -half
+				end_z = half - 1
+			2:  # SE
+				start_x = 1 - half
+				end_x = half
+				start_z = 1 - half
+				end_z = half
+			3:  # SW
+				start_x = -half
+				end_x = half - 1
+				start_z = 1 - half
+				end_z = half
+			_:
+				# Fallback to cell-centered
+				start_x = -half
+				end_x = brush_size - half - 1
+				start_z = -half
+				end_z = brush_size - half - 1
+	else:
+		# Cell-centered logic for odd sizes
+		# Odd sizes (1,3,5,7,9): centered, e.g. size 3 = -1 to +1
+		start_x = -half
+		end_x = brush_size - half - 1
+		start_z = -half
+		end_z = brush_size - half - 1
+
+	for dz in range(start_z, end_z + 1):
+		for dx in range(start_x, end_x + 1):
 			var cell := Vector2i(center.x + dx, center.y + dz)
 			if data.is_valid_cell(cell.x, cell.y):
 				cells.append(cell)
@@ -798,7 +847,7 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 		return
 
 	# Get all cells in brush area for display
-	var brush_cells := _drag_brush_cells if _is_dragging else get_brush_cells(display_cell, data)
+	var brush_cells := _drag_brush_cells if _is_dragging else get_brush_cells(display_cell, data, _brush_corner)
 
 	# Paint tool: show outline only (tile preview is done via shader)
 	if current_tool == Tool.PAINT:
