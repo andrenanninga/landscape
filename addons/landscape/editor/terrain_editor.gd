@@ -80,6 +80,8 @@ var _drag_world_pos: Vector3 = Vector3.ZERO  # World position of drag point for 
 var _drag_brush_cells: Array[Vector2i] = []  # All cells in brush area during drag
 var _drag_brush_original_corners: Dictionary = {}  # Original corners for each cell in brush: "x,z" -> Array[int]
 var _drag_sticky_corners: Array[int] = []  # Current heights for non-dragged corners (sticky per step)
+var _drag_brush_min_height: int = 0  # Min corner height across all brush cells at drag start
+var _drag_brush_max_height: int = 0  # Max corner height across all brush cells at drag start
 
 # Paint drag state
 var _is_paint_dragging: bool = false
@@ -259,13 +261,18 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 		_drag_original_corners.append(c)
 	_drag_sticky_corners = _drag_original_corners.duplicate()
 
-	# Store original heights for all brush cells
+	# Store original heights for all brush cells and find min/max
 	_drag_brush_cells = get_brush_cells(_drag_cell, data, _brush_corner)
 	_drag_brush_original_corners.clear()
+	_drag_brush_min_height = 999999
+	_drag_brush_max_height = -999999
 	for cell in _drag_brush_cells:
 		var key := "%d,%d" % [cell.x, cell.y]
 		var cell_corners := data.get_top_corners(cell.x, cell.y)
 		_drag_brush_original_corners[key] = cell_corners.duplicate()
+		for c in cell_corners:
+			_drag_brush_min_height = mini(_drag_brush_min_height, c)
+			_drag_brush_max_height = maxi(_drag_brush_max_height, c)
 
 	# Calculate world position for scale reference
 	var cell_size := data.cell_size
@@ -337,8 +344,8 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 		data.set_top_corners(_drag_cell.x, _drag_cell.y, new_corners)
 		var world_height := data.steps_to_world(new_corners[_drag_corner])
 		height_changed.emit(world_height, _drag_corner, _drag_mode)
-	else:
-		# Cell mode - raise/lower all corners of all brush cells
+	elif brush_size == 1:
+		# Single cell mode - uniform raise/lower of all corners
 		for cell in _drag_brush_cells:
 			var key := "%d,%d" % [cell.x, cell.y]
 			var original: Array = _drag_brush_original_corners[key]
@@ -353,6 +360,31 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 			avg_height += data.steps_to_world(c + _drag_current_delta)
 		avg_height /= 4.0
 		height_changed.emit(avg_height, -1, _drag_mode)
+	else:
+		# Multi-cell brush - leveling sculpt
+		# When raising: bring low corners up toward target (min + delta)
+		# When lowering: bring high corners down toward target (max + delta)
+		var target_height: int
+		if _drag_current_delta >= 0:
+			target_height = _drag_brush_min_height + _drag_current_delta
+		else:
+			target_height = _drag_brush_max_height + _drag_current_delta
+
+		for cell in _drag_brush_cells:
+			var current_corners := data.get_top_corners(cell.x, cell.y)
+			var new_corners: Array[int] = []
+			for i in 4:
+				if _drag_current_delta >= 0:
+					# Raising: corners move up toward target, never down
+					new_corners.append(maxi(current_corners[i], target_height))
+				else:
+					# Lowering: corners move down toward target, never up
+					new_corners.append(mini(current_corners[i], target_height))
+			data.set_top_corners(cell.x, cell.y, new_corners)
+
+		# Report target height
+		var world_height := data.steps_to_world(target_height)
+		height_changed.emit(world_height, -1, _drag_mode)
 
 
 func _calculate_dragged_corners(dragged_corner: int, target_height: int, max_slope: int) -> Array[int]:
