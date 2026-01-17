@@ -84,7 +84,8 @@ var _drag_sticky_corners: Array[int] = []  # Current heights for non-dragged cor
 var _is_paint_dragging: bool = false
 var _last_painted_cell: Vector2i = Vector2i(-1, -1)
 var _last_painted_surface: TerrainData.Surface = TerrainData.Surface.TOP
-var _painted_cells_this_drag: Dictionary = {}  # Tracks cells painted during current drag
+var _paint_preview_buffer: Dictionary = {}  # Preview buffer: "x,z,surface" -> packed_tile_value
+var _paint_original_values: Dictionary = {}  # Original values for undo: "x,z,surface" -> packed_tile_value
 
 
 func set_terrain(terrain: LandscapeTerrain) -> void:
@@ -103,9 +104,10 @@ func _clear_hover() -> void:
 		_hovered_corner = -1
 		_hover_mode = HoverMode.CELL
 		hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
-	# Clear shader-based paint preview
+	# Clear buffer-based paint preview
 	if _terrain:
-		_terrain.clear_paint_preview()
+		_terrain.clear_preview()
+	_paint_preview_buffer.clear()
 
 
 func get_current_height() -> float:
@@ -188,7 +190,7 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 				_cancel_drag()
 				return true
 			elif _is_paint_dragging:
-				_finish_paint_drag()
+				cancel_paint_preview()
 				return true
 
 	return false
@@ -204,13 +206,17 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 
 	# Handle paint tool
 	if current_tool == Tool.PAINT:
-		_painted_cells_this_drag.clear()
-		var painted := _paint_brush_area(data, _hovered_cell, _hovered_surface)
-		if painted:
+		# Clear any existing preview and start fresh
+		_paint_preview_buffer.clear()
+		_paint_original_values.clear()
+		# Build preview for initial brush area
+		var previewed := _build_paint_preview(data, _hovered_cell, _hovered_surface)
+		if previewed:
 			_is_paint_dragging = true
 			_last_painted_cell = _hovered_cell
 			_last_painted_surface = _hovered_surface
-		return painted
+			_terrain.set_tile_previews(_paint_preview_buffer)
+		return previewed
 
 	# Handle flip diagonal tool
 	if current_tool == Tool.FLIP_DIAGONAL:
@@ -456,16 +462,47 @@ func _update_paint_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 	if _hovered_cell.x < 0:
 		return
 
-	# Only paint if cell or surface changed
+	# Only update preview if cell or surface changed
 	if _hovered_cell == _last_painted_cell and _hovered_surface == _last_painted_surface:
 		return
 
-	_paint_brush_area(data, _hovered_cell, _hovered_surface)
+	# Add new cells to preview (accumulate)
+	_build_paint_preview(data, _hovered_cell, _hovered_surface)
+	_terrain.set_tile_previews(_paint_preview_buffer)
 	_last_painted_cell = _hovered_cell
 	_last_painted_surface = _hovered_surface
 
 
 func _finish_paint_drag() -> void:
+	if not _terrain or _paint_preview_buffer.is_empty():
+		_is_paint_dragging = false
+		_last_painted_cell = Vector2i(-1, -1)
+		_paint_preview_buffer.clear()
+		_paint_original_values.clear()
+		return
+
+	var data := _terrain.terrain_data
+	if not data:
+		_is_paint_dragging = false
+		return
+
+	# Create undo/redo action from preview data
+	undo_redo.create_action("Paint Terrain Tiles")
+	for key: String in _paint_preview_buffer.keys():
+		var parts: PackedStringArray = key.split(",")
+		var x := int(parts[0])
+		var z := int(parts[1])
+		var surface := int(parts[2]) as TerrainData.Surface
+		var new_packed: int = _paint_preview_buffer[key]
+		var old_packed: int = _paint_original_values[key]
+		undo_redo.add_do_method(data, "set_tile_packed", x, z, surface, new_packed)
+		undo_redo.add_undo_method(data, "set_tile_packed", x, z, surface, old_packed)
+	undo_redo.commit_action()
+
+	# Clear preview
+	_terrain.clear_preview()
+	_paint_preview_buffer.clear()
+	_paint_original_values.clear()
 	_is_paint_dragging = false
 	_last_painted_cell = Vector2i(-1, -1)
 
@@ -517,16 +554,9 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 		_hover_mode = HoverMode.CELL
 		if old_cell != _hovered_cell or old_surface != _hovered_surface:
 			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
-		# Update shader-based paint preview
-		if current_tool == Tool.PAINT and _terrain:
-			_terrain.set_paint_preview(
-				_hovered_cell,
-				_hovered_surface as int,
-				current_paint_tile,
-				current_paint_rotation as int,
-				current_paint_flip_h,
-				current_paint_flip_v
-			)
+		# Update buffer-based paint preview (hover preview, not during drag)
+		if current_tool == Tool.PAINT and _terrain and not _is_paint_dragging:
+			_update_hover_paint_preview()
 		return
 
 	# Calculate position within cell to determine corner vs center (sculpt tool)
@@ -659,66 +689,60 @@ func _flip_diagonal_brush_area(data: TerrainData, center: Vector2i) -> void:
 	undo_redo.commit_action()
 
 
-func _paint_brush_area(data: TerrainData, center: Vector2i, surface: TerrainData.Surface) -> bool:
-	var brush_cells := get_brush_cells(center, data)
-	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
-
-	# Collect cells that need to be painted (not already painted this drag, and different value)
-	var cells_to_paint: Array[Dictionary] = []
-	for cell in brush_cells:
-		var key := "%d,%d,%d" % [cell.x, cell.y, surface]
-		if _painted_cells_this_drag.has(key):
-			continue
-
-		var old_packed := data.get_tile_packed(cell.x, cell.y, surface)
-		if old_packed != new_packed:
-			cells_to_paint.append({
-				"x": cell.x,
-				"z": cell.y,
-				"old": old_packed,
-				"new": new_packed
-			})
-		_painted_cells_this_drag[key] = true
-
-	if cells_to_paint.is_empty():
-		return brush_cells.size() > 0  # Return true if we have valid brush area
-
-	# Create single undo action for all cells
-	undo_redo.create_action("Paint Terrain Tiles")
-	for cell_data in cells_to_paint:
-		undo_redo.add_do_method(data, "set_tile_packed", cell_data.x, cell_data.z, surface, cell_data.new)
-		undo_redo.add_undo_method(data, "set_tile_packed", cell_data.x, cell_data.z, surface, cell_data.old)
-	undo_redo.commit_action()
-
-	return true
-
-
-func _paint_cell(data: TerrainData, x: int, z: int, surface: TerrainData.Surface) -> bool:
-	var old_packed := data.get_tile_packed(x, z, surface)
-	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
-
-	if old_packed == new_packed:
-		return false
-
-	undo_redo.create_action("Paint Terrain Tile")
-	undo_redo.add_do_method(data, "set_tile_packed", x, z, surface, new_packed)
-	undo_redo.add_undo_method(data, "set_tile_packed", x, z, surface, old_packed)
-	undo_redo.commit_action()
-
-	return true
-
-
 func _update_paint_preview() -> void:
 	if current_tool != Tool.PAINT or not _terrain or _hovered_cell.x < 0:
 		return
-	_terrain.set_paint_preview(
-		_hovered_cell,
-		_hovered_surface as int,
-		current_paint_tile,
-		current_paint_rotation as int,
-		current_paint_flip_h,
-		current_paint_flip_v
-	)
+	_update_hover_paint_preview()
+
+
+func _update_hover_paint_preview() -> void:
+	if not _terrain or _hovered_cell.x < 0:
+		return
+
+	var data := _terrain.terrain_data
+	if not data:
+		return
+
+	# Build hover preview for entire brush area
+	var hover_preview: Dictionary = {}
+	var brush_cells := get_brush_cells(_hovered_cell, data)
+	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
+
+	for cell in brush_cells:
+		var key := "%d,%d,%d" % [cell.x, cell.y, _hovered_surface]
+		hover_preview[key] = new_packed
+
+	_terrain.set_tile_previews(hover_preview)
+
+
+func _build_paint_preview(data: TerrainData, center: Vector2i, surface: TerrainData.Surface) -> bool:
+	var brush_cells := get_brush_cells(center, data)
+	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
+
+	var any_added := false
+	for cell in brush_cells:
+		var key := "%d,%d,%d" % [cell.x, cell.y, surface]
+		# Skip if already in preview buffer
+		if _paint_preview_buffer.has(key):
+			continue
+
+		var old_packed := data.get_tile_packed(cell.x, cell.y, surface)
+		# Store original value for undo
+		_paint_original_values[key] = old_packed
+		# Add to preview buffer
+		_paint_preview_buffer[key] = new_packed
+		any_added = true
+
+	return any_added or brush_cells.size() > 0
+
+
+func cancel_paint_preview() -> void:
+	if _terrain:
+		_terrain.clear_preview()
+	_paint_preview_buffer.clear()
+	_paint_original_values.clear()
+	_is_paint_dragging = false
+	_last_painted_cell = Vector2i(-1, -1)
 
 
 # Helper functions for paint tool rotation/flip

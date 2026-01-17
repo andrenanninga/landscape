@@ -9,6 +9,7 @@ var _dock: Control
 var _terrain_editor: TerrainEditor
 var _current_terrain: LandscapeTerrain
 var _inspector_plugin: EditorInspectorPlugin
+var _was_window_focused: bool = true
 
 
 func _enter_tree() -> void:
@@ -101,3 +102,15 @@ func _forward_3d_draw_over_viewport(overlay: Control) -> void:
 func _on_hover_changed(_cell: Vector2i, _corner: int, _mode: int) -> void:
 	# Overlay-based highlighting is handled in draw_overlay
 	pass
+
+
+func _process(_delta: float) -> void:
+	if not _terrain_editor:
+		return
+
+	# Check if the main window has focus
+	var is_focused := DisplayServer.window_is_focused()
+	if _was_window_focused and not is_focused:
+		# Window lost focus - cancel any paint preview
+		_terrain_editor.cancel_paint_preview()
+	_was_window_focused = is_focused

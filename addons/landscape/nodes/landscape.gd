@@ -70,6 +70,7 @@ signal terrain_changed
 
 var _mesh_builder: TerrainMeshBuilder
 var _tile_data_texture: ImageTexture
+var _preview_buffer: Dictionary = {}  # "x,z,surface" -> packed_tile_value
 
 
 func _ready() -> void:
@@ -130,7 +131,14 @@ func _update_tile_data_texture() -> void:
 		for x in terrain_data.grid_width:
 			var tiles := terrain_data.get_all_tiles_packed(x, z)
 			for surface in 5:
-				var packed := tiles[surface]
+				# Check if preview buffer has an override for this cell/surface
+				var key := "%d,%d,%d" % [x, z, surface]
+				var packed: int
+				if _preview_buffer.has(key):
+					packed = _preview_buffer[key]
+				else:
+					packed = tiles[surface]
+
 				var tile_index := packed & TerrainData.TILE_INDEX_MASK
 				var rotation := (packed & TerrainData.TILE_ROTATION_MASK) >> TerrainData.TILE_ROTATION_SHIFT
 				var flip_h := 1 if (packed & TerrainData.TILE_FLIP_H_BIT) != 0 else 0
@@ -224,21 +232,30 @@ func clear_selection() -> void:
 		mat.set_shader_parameter("corner_mode", false)
 
 
-func set_paint_preview(cell: Vector2i, surface: int, tile: int, rotation: int, flip_h: bool, flip_v: bool) -> void:
+func set_tile_previews(previews: Dictionary) -> void:
+	_preview_buffer = previews
+	_update_tile_data_texture()
 	var mat := material_override as ShaderMaterial
-	if mat:
-		mat.set_shader_parameter("preview_cell", cell)
-		mat.set_shader_parameter("preview_surface", surface)
-		mat.set_shader_parameter("preview_tile", tile)
-		mat.set_shader_parameter("preview_rotation", rotation)
-		mat.set_shader_parameter("preview_flip_h", flip_h)
-		mat.set_shader_parameter("preview_flip_v", flip_v)
+	if mat and _tile_data_texture:
+		mat.set_shader_parameter("tile_data", _tile_data_texture)
 
 
-func clear_paint_preview() -> void:
+func get_preview_buffer() -> Dictionary:
+	return _preview_buffer
+
+
+func clear_preview() -> void:
+	if _preview_buffer.is_empty():
+		return
+	_preview_buffer.clear()
+	_update_tile_data_texture()
 	var mat := material_override as ShaderMaterial
-	if mat:
-		mat.set_shader_parameter("preview_cell", Vector2i(-1, -1))
+	if mat and _tile_data_texture:
+		mat.set_shader_parameter("tile_data", _tile_data_texture)
+
+
+func has_preview() -> bool:
+	return not _preview_buffer.is_empty()
 
 
 # Helper to convert world position to nearest corner
