@@ -78,6 +78,7 @@ var _drag_start_mouse_y: float = 0.0
 var _drag_world_pos: Vector3 = Vector3.ZERO  # World position of drag point for scale calculation
 var _drag_brush_cells: Array[Vector2i] = []  # All cells in brush area during drag
 var _drag_brush_original_corners: Dictionary = {}  # Original corners for each cell in brush: "x,z" -> Array[int]
+var _drag_sticky_corners: Array[int] = []  # Current heights for non-dragged corners (sticky per step)
 
 # Paint drag state
 var _is_paint_dragging: bool = false
@@ -249,6 +250,7 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 	var corners := data.get_top_corners(_drag_cell.x, _drag_cell.y)
 	for c in corners:
 		_drag_original_corners.append(c)
+	_drag_sticky_corners = _drag_original_corners.duplicate()
 
 	# Store original heights for all brush cells
 	_drag_brush_cells = get_brush_cells(_drag_cell, data)
@@ -347,13 +349,13 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 
 
 func _calculate_dragged_corners(dragged_corner: int, target_height: int, max_slope: int) -> Array[int]:
-	# Start with original corners
+	# Start with sticky corners (current heights) for non-dragged, target for dragged
 	var corners: Array[int] = []
-	for c in _drag_original_corners:
-		corners.append(c)
-
-	# Set the dragged corner to target
-	corners[dragged_corner] = target_height
+	for i in 4:
+		if i == dragged_corner:
+			corners.append(target_height)
+		else:
+			corners.append(_drag_sticky_corners[i])
 
 	# Edge-adjacent corners (NW=0, NE=1, SE=2, SW=3)
 	var adjacents := [
@@ -370,7 +372,7 @@ func _calculate_dragged_corners(dragged_corner: int, target_height: int, max_slo
 	var adjacent_corners: Array = adjacents[dragged_corner]
 	var diagonal_corner: int = diagonal[dragged_corner]
 
-	# Constrain adjacent corners to dragged corner
+	# Constrain adjacent corners to dragged corner (only move if slope constraint requires it)
 	for adj in adjacent_corners:
 		var min_h := corners[dragged_corner] - max_slope
 		var max_h := corners[dragged_corner] + max_slope
@@ -383,6 +385,11 @@ func _calculate_dragged_corners(dragged_corner: int, target_height: int, max_slo
 		min_h = maxi(min_h, corners[adj] - max_slope)
 		max_h = mini(max_h, corners[adj] + max_slope)
 	corners[diagonal_corner] = clampi(corners[diagonal_corner], min_h, max_h)
+
+	# Update sticky corners for non-dragged corners
+	for i in 4:
+		if i != dragged_corner:
+			_drag_sticky_corners[i] = corners[i]
 
 	return corners
 
