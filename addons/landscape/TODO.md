@@ -19,6 +19,10 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Mountain tool** - Create hills/valleys with smooth sloped edges that respect max_slope_steps
+- [x] **Flatten tool drag support** - Click and drag to flatten terrain along brush path
+- [x] **Batched terrain updates** - TerrainData.begin_batch/end_batch for efficient large brush operations
+- [x] **Performance optimization** - All tools now batch updates to emit data_changed only once per operation
 - [x] **Shader-based paint preview** - Tile preview renders through shader for correct wall texture repeating (replaces stretched overlay preview)
 - [x] **Paint tool keyboard shortcuts** - Tiled-style shortcuts: X (flip H), Y (flip V), Z (rotate CW), Shift+Z (rotate CCW)
 - [x] **TileMapLayer-style tile palette** - Pan/zoom canvas with fixed tile positions, trackpad support (two-finger pan, pinch zoom, Ctrl+scroll zoom)
@@ -159,3 +163,19 @@
   - Preview renders through same shader as final result
   - Correctly shows repeating texture on tall walls (was stretching with overlay)
   - Preview updates when changing tile, rotation, or flip settings
+
+### 2025-01-18 - Mountain Tool & Performance
+- Implemented Mountain tool:
+  - Creates hills (drag up) or valleys (drag down) with smooth slopes
+  - Uses BFS to propagate slope heights outward from brush core
+  - Respects max_slope_steps for natural-looking terrain
+  - Precomputes corner distances at drag start for performance
+- Added flatten tool drag support:
+  - Click sets target height, drag to flatten all cells under brush path
+  - Single undo action for entire drag operation
+  - Right-click to cancel and revert changes
+- Performance optimization with batched updates:
+  - Added TerrainData.begin_batch() / end_batch() methods
+  - data_changed signal only emits once at end of batch
+  - All tools (sculpt, flatten, mountain, flip diagonal) now use batching
+  - Dramatic performance improvement for large brush sizes (8x8, 9x9)

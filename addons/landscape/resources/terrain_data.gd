@@ -15,6 +15,8 @@ enum Rotation { ROT_0 = 0, ROT_90 = 1, ROT_180 = 2, ROT_270 = 3 }
 
 # Grid configuration
 var _skip_resize: bool = false
+var _batch_mode: bool = false
+var _batch_changed: bool = false
 
 @export var grid_width: int = 8:
 	set(value):
@@ -145,6 +147,21 @@ func set_top_corners(x: int, z: int, corners: Array[int]) -> void:
 			cells[idx + i] = corners[i]
 			changed = true
 	if changed:
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
+
+
+func begin_batch() -> void:
+	_batch_mode = true
+	_batch_changed = false
+
+
+func end_batch() -> void:
+	_batch_mode = false
+	if _batch_changed:
+		_batch_changed = false
 		data_changed.emit()
 
 
@@ -261,7 +278,10 @@ func set_diagonal_flip(x: int, z: int, flip: bool) -> void:
 		new_value = old_value & ~DIAGONAL_FLIP_BIT
 	if old_value != new_value:
 		cells[idx] = new_value
-		data_changed.emit()
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
 
 
 func toggle_diagonal_flip(x: int, z: int) -> void:

@@ -2,7 +2,7 @@
 class_name TerrainEditor
 extends RefCounted
 
-enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN }
+enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN, MOUNTAIN }
 enum HoverMode { CELL, CORNER }
 
 signal tool_changed(new_tool: Tool)
@@ -82,6 +82,14 @@ var _drag_brush_original_corners: Dictionary = {}  # Original corners for each c
 var _drag_sticky_corners: Array[int] = []  # Current heights for non-dragged corners (sticky per step)
 var _drag_brush_min_height: int = 0  # Min corner height across all brush cells at drag start
 var _drag_brush_max_height: int = 0  # Max corner height across all brush cells at drag start
+var _drag_mountain_all_cells: Array[Vector2i] = []  # All cells affected by mountain tool (core + slopes)
+var _drag_mountain_original_corners: Dictionary = {}  # Original corners for all mountain-affected cells
+var _drag_mountain_corner_distances: Dictionary = {}  # Precomputed corner distances from core
+
+# Flatten drag state
+var _is_flatten_dragging: bool = false
+var _flatten_target_height: int = 0
+var _flatten_affected_cells: Dictionary = {}  # Vector2i -> original corners Array[int]
 
 # Paint drag state
 var _is_paint_dragging: bool = false
@@ -169,6 +177,9 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 		if _is_dragging:
 			_update_drag(camera, motion.position)
 			return true
+		elif _is_flatten_dragging:
+			_update_flatten_drag(camera, motion.position)
+			return true
 		elif _is_paint_dragging:
 			_update_paint_drag(camera, motion.position)
 			return true
@@ -185,12 +196,18 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 				if _is_dragging:
 					_finish_drag()
 					return true
+				elif _is_flatten_dragging:
+					_finish_flatten_drag()
+					return true
 				elif _is_paint_dragging:
 					_finish_paint_drag()
 					return true
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			if _is_dragging:
 				_cancel_drag()
+				return true
+			elif _is_flatten_dragging:
+				_cancel_flatten_drag()
 				return true
 			elif _is_paint_dragging:
 				cancel_paint_preview()
@@ -226,20 +243,24 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 		_flip_diagonal_brush_area(data, _hovered_cell)
 		return true
 
-	# Handle flatten tool
+	# Handle flatten tool - start drag
 	if current_tool == Tool.FLATTEN:
 		# Get target height from the hovered corner
-		var target_height: int
 		var corners := data.get_top_corners(_hovered_cell.x, _hovered_cell.y)
 		if _hover_mode == HoverMode.CORNER and _hovered_corner >= 0:
-			target_height = corners[_hovered_corner]
+			_flatten_target_height = corners[_hovered_corner]
 		else:
 			# Use average height if clicking cell center
-			target_height = int(round(float(corners[0] + corners[1] + corners[2] + corners[3]) / 4.0))
-		_flatten_brush_area(data, _hovered_cell, target_height)
+			_flatten_target_height = int(round(float(corners[0] + corners[1] + corners[2] + corners[3]) / 4.0))
+
+		_is_flatten_dragging = true
+		_flatten_affected_cells.clear()
+
+		# Apply to initial brush area
+		_apply_flatten_to_brush(data, _hovered_cell)
 		return true
 
-	if current_tool != Tool.SCULPT:
+	if current_tool != Tool.SCULPT and current_tool != Tool.MOUNTAIN:
 		return false
 
 	_is_dragging = true
@@ -273,6 +294,68 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 		for c in cell_corners:
 			_drag_brush_min_height = mini(_drag_brush_min_height, c)
 			_drag_brush_max_height = maxi(_drag_brush_max_height, c)
+
+	# For mountain tool, also store surrounding cells that may be affected by slopes
+	if current_tool == Tool.MOUNTAIN:
+		_drag_mountain_original_corners.clear()
+		_drag_mountain_all_cells.clear()
+		_drag_mountain_corner_distances.clear()
+
+		# Corner offsets for precomputation
+		var corner_offsets: Array[Vector2i] = [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1)]
+
+		# Store core brush cells (use Vector2i keys for performance)
+		var brush_set: Dictionary = {}
+		for cell in _drag_brush_cells:
+			_drag_mountain_all_cells.append(cell)
+			_drag_mountain_original_corners[cell] = _drag_brush_original_corners["%d,%d" % [cell.x, cell.y]].duplicate()
+			brush_set[cell] = true
+		# Expand outward to collect slope cells (up to 9 rings for max height change)
+		var max_rings := 9
+		var current_ring := _drag_brush_cells.duplicate()
+		for _ring in max_rings:
+			var next_ring: Array[Vector2i] = []
+			for cell in current_ring:
+				# Check all 8 neighbors
+				for dz in range(-1, 2):
+					for dx in range(-1, 2):
+						if dx == 0 and dz == 0:
+							continue
+						var neighbor := Vector2i(cell.x + dx, cell.y + dz)
+						if not brush_set.has(neighbor) and data.is_valid_cell(neighbor.x, neighbor.y):
+							if not _drag_mountain_original_corners.has(neighbor):
+								_drag_mountain_all_cells.append(neighbor)
+								_drag_mountain_original_corners[neighbor] = data.get_top_corners(neighbor.x, neighbor.y).duplicate()
+								next_ring.append(neighbor)
+			current_ring = next_ring
+			if current_ring.is_empty():
+				break
+
+		# Precompute corner distances using BFS
+		var valid_corners: Dictionary = {}
+		for cell in _drag_mountain_all_cells:
+			for offset in corner_offsets:
+				valid_corners[Vector2i(cell.x + offset.x, cell.y + offset.y)] = true
+
+		var queue: Array[Vector2i] = []
+		for cell in _drag_brush_cells:
+			for offset in corner_offsets:
+				var corner_pos := Vector2i(cell.x + offset.x, cell.y + offset.y)
+				if not _drag_mountain_corner_distances.has(corner_pos):
+					_drag_mountain_corner_distances[corner_pos] = 0
+					queue.append(corner_pos)
+
+		var directions: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+		var head := 0
+		while head < queue.size():
+			var pos := queue[head]
+			head += 1
+			var dist: int = _drag_mountain_corner_distances[pos]
+			for dir in directions:
+				var neighbor := Vector2i(pos.x + dir.x, pos.y + dir.y)
+				if valid_corners.has(neighbor) and not _drag_mountain_corner_distances.has(neighbor):
+					_drag_mountain_corner_distances[neighbor] = dist + 1
+					queue.append(neighbor)
 
 	# Calculate world position for scale reference
 	var cell_size := data.cell_size
@@ -337,7 +420,12 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 	_drag_current_delta = new_delta
 
 	# Apply the new heights directly (no undo yet)
-	if _drag_mode == HoverMode.CORNER:
+	if current_tool == Tool.MOUNTAIN:
+		# Mountain tool: raise/lower core with slopes radiating outward
+		_apply_mountain_heights(data, _drag_current_delta)
+		var world_height := data.steps_to_world(_drag_brush_min_height + _drag_current_delta)
+		height_changed.emit(world_height, -1, _drag_mode)
+	elif _drag_mode == HoverMode.CORNER:
 		# Single corner mode (only for brush_size == 0)
 		var corner_target := _drag_original_corners[_drag_corner] + _drag_current_delta
 		var new_corners := _calculate_dragged_corners(_drag_corner, corner_target, data.max_slope_steps)
@@ -346,6 +434,7 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 		height_changed.emit(world_height, _drag_corner, _drag_mode)
 	elif brush_size == 1:
 		# Single cell mode - uniform raise/lower of all corners
+		data.begin_batch()
 		for cell in _drag_brush_cells:
 			var key := "%d,%d" % [cell.x, cell.y]
 			var original: Array = _drag_brush_original_corners[key]
@@ -353,6 +442,7 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 			for i in 4:
 				new_corners.append(original[i] + _drag_current_delta)
 			data.set_top_corners(cell.x, cell.y, new_corners)
+		data.end_batch()
 
 		# Report height for center cell
 		var avg_height := 0.0
@@ -370,6 +460,7 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 		else:
 			target_height = _drag_brush_max_height + _drag_current_delta
 
+		data.begin_batch()
 		for cell in _drag_brush_cells:
 			var current_corners := data.get_top_corners(cell.x, cell.y)
 			var new_corners: Array[int] = []
@@ -381,6 +472,7 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 					# Lowering: corners move down toward target, never up
 					new_corners.append(mini(current_corners[i], target_height))
 			data.set_top_corners(cell.x, cell.y, new_corners)
+		data.end_batch()
 
 		# Report target height
 		var world_height := data.steps_to_world(target_height)
@@ -433,6 +525,49 @@ func _calculate_dragged_corners(dragged_corner: int, target_height: int, max_slo
 	return corners
 
 
+func _apply_mountain_heights(data: TerrainData, delta: int) -> void:
+	var max_slope := data.max_slope_steps
+
+	# Calculate reference height for the peak/valley
+	var peak_height: int = _drag_brush_max_height + delta if delta >= 0 else _drag_brush_min_height + delta
+
+	# Batch updates to avoid emitting data_changed for each cell
+	data.begin_batch()
+
+	# Apply heights to cells using precomputed corner distances
+	for cell in _drag_mountain_all_cells:
+		var original: Array = _drag_mountain_original_corners[cell]
+		var cx := cell.x
+		var cy := cell.y
+
+		var d0: int = _drag_mountain_corner_distances.get(Vector2i(cx, cy), 0)
+		var d1: int = _drag_mountain_corner_distances.get(Vector2i(cx + 1, cy), 0)
+		var d2: int = _drag_mountain_corner_distances.get(Vector2i(cx + 1, cy + 1), 0)
+		var d3: int = _drag_mountain_corner_distances.get(Vector2i(cx, cy + 1), 0)
+
+		var o0: int = original[0]
+		var o1: int = original[1]
+		var o2: int = original[2]
+		var o3: int = original[3]
+
+		if delta >= 0:
+			data.set_top_corners(cx, cy, [
+				maxi(o0, peak_height - d0 * max_slope),
+				maxi(o1, peak_height - d1 * max_slope),
+				maxi(o2, peak_height - d2 * max_slope),
+				maxi(o3, peak_height - d3 * max_slope),
+			])
+		else:
+			data.set_top_corners(cx, cy, [
+				mini(o0, peak_height + d0 * max_slope),
+				mini(o1, peak_height + d1 * max_slope),
+				mini(o2, peak_height + d2 * max_slope),
+				mini(o3, peak_height + d3 * max_slope),
+			])
+
+	data.end_batch()
+
+
 func _finish_drag() -> void:
 	if not _is_dragging or not _terrain:
 		_is_dragging = false
@@ -444,17 +579,33 @@ func _finish_drag() -> void:
 		return
 
 	# Create undo/redo action for the final change
-	undo_redo.create_action("Sculpt Terrain")
+	var action_name := "Mountain Terrain" if current_tool == Tool.MOUNTAIN else "Sculpt Terrain"
+	undo_redo.create_action(action_name)
 
-	for cell in _drag_brush_cells:
-		var key := "%d,%d" % [cell.x, cell.y]
-		var original: Array = _drag_brush_original_corners[key]
+	# Use mountain cells if mountain tool, otherwise brush cells
+	var cells_to_undo: Array[Vector2i] = _drag_mountain_all_cells if current_tool == Tool.MOUNTAIN else _drag_brush_cells
+	var use_vector_keys := current_tool == Tool.MOUNTAIN
+
+	for cell in cells_to_undo:
+		var original: Array
+		if use_vector_keys:
+			if not _drag_mountain_original_corners.has(cell):
+				continue
+			original = _drag_mountain_original_corners[cell]
+		else:
+			var key := "%d,%d" % [cell.x, cell.y]
+			if not _drag_brush_original_corners.has(key):
+				continue
+			original = _drag_brush_original_corners[key]
+
 		var final_corners := data.get_top_corners(cell.x, cell.y)
 		var original_typed: Array[int] = []
 		for c in original:
 			original_typed.append(c)
-		undo_redo.add_do_method(data, "set_top_corners", cell.x, cell.y, final_corners)
-		undo_redo.add_undo_method(data, "set_top_corners", cell.x, cell.y, original_typed)
+		# Only add undo if there was a change
+		if original_typed != final_corners:
+			undo_redo.add_do_method(data, "set_top_corners", cell.x, cell.y, final_corners)
+			undo_redo.add_undo_method(data, "set_top_corners", cell.x, cell.y, original_typed)
 
 	undo_redo.commit_action(false)  # Don't execute, already applied
 
@@ -468,15 +619,26 @@ func _cancel_drag() -> void:
 
 	var data := _terrain.terrain_data
 	if data:
-		# Restore original heights for all brush cells
-		for cell in _drag_brush_cells:
-			var key := "%d,%d" % [cell.x, cell.y]
-			if _drag_brush_original_corners.has(key):
-				var original: Array = _drag_brush_original_corners[key]
-				var original_typed: Array[int] = []
-				for c in original:
-					original_typed.append(c)
-				data.set_top_corners(cell.x, cell.y, original_typed)
+		# Use mountain cells if mountain tool, otherwise brush cells
+		var cells_to_restore: Array[Vector2i] = _drag_mountain_all_cells if current_tool == Tool.MOUNTAIN else _drag_brush_cells
+		var use_vector_keys := current_tool == Tool.MOUNTAIN
+
+		for cell in cells_to_restore:
+			var original: Array
+			if use_vector_keys:
+				if not _drag_mountain_original_corners.has(cell):
+					continue
+				original = _drag_mountain_original_corners[cell]
+			else:
+				var key := "%d,%d" % [cell.x, cell.y]
+				if not _drag_brush_original_corners.has(key):
+					continue
+				original = _drag_brush_original_corners[key]
+
+			var original_typed: Array[int] = []
+			for c in original:
+				original_typed.append(c)
+			data.set_top_corners(cell.x, cell.y, original_typed)
 
 	_is_dragging = false
 
@@ -610,8 +772,8 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 	# Store brush corner for even brush size centering
 	_brush_corner = closest_corner
 
-	# For paint and flip diagonal tools, we don't need corner hover mode
-	if current_tool == Tool.PAINT or current_tool == Tool.FLIP_DIAGONAL:
+	# For paint, flip diagonal, and mountain tools, we don't need corner hover mode
+	if current_tool == Tool.PAINT or current_tool == Tool.FLIP_DIAGONAL or current_tool == Tool.MOUNTAIN:
 		_hovered_corner = -1
 		_hover_mode = HoverMode.CELL
 		if old_cell != _hovered_cell or old_surface != _hovered_surface:
@@ -677,37 +839,125 @@ func _raycast_terrain(origin: Vector3, direction: Vector3) -> Dictionary:
 	return {}
 
 
-func _flatten_brush_area(data: TerrainData, center: Vector2i, target_height: int) -> void:
+func _apply_flatten_to_brush(data: TerrainData, center: Vector2i) -> void:
 	var brush_cells := get_brush_cells(center, data, _brush_corner)
 
 	if brush_cells.is_empty():
 		return
 
-	# Collect cells that need to be changed
-	var changes: Array[Dictionary] = []
+	data.begin_batch()
 	for cell in brush_cells:
+		# Skip cells already flattened in this drag
+		if _flatten_affected_cells.has(cell):
+			continue
+
 		var old_corners := data.get_top_corners(cell.x, cell.y)
-		var new_corners: Array[int] = [target_height, target_height, target_height, target_height]
 
-		# Check if there's actually a change
-		if old_corners[0] != target_height or old_corners[1] != target_height or \
-		   old_corners[2] != target_height or old_corners[3] != target_height:
-			changes.append({
-				"x": cell.x,
-				"z": cell.y,
-				"old": old_corners,
-				"new": new_corners
-			})
+		# Check if there's actually a change needed
+		if old_corners[0] != _flatten_target_height or old_corners[1] != _flatten_target_height or \
+		   old_corners[2] != _flatten_target_height or old_corners[3] != _flatten_target_height:
+			# Store original for undo
+			_flatten_affected_cells[cell] = old_corners.duplicate()
+			# Apply flatten
+			data.set_top_corners(cell.x, cell.y, [_flatten_target_height, _flatten_target_height, _flatten_target_height, _flatten_target_height])
+	data.end_batch()
 
-	if changes.is_empty():
+
+func _update_flatten_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
+	if not _is_flatten_dragging or not _terrain:
 		return
 
-	# Create single undo action for all cells
+	var data := _terrain.terrain_data
+	if not data:
+		return
+
+	# Raycast to find current cell
+	var ray_origin := camera.project_ray_origin(mouse_pos)
+	var ray_dir := camera.project_ray_normal(mouse_pos)
+	var hit := _raycast_terrain(ray_origin, ray_dir)
+
+	if hit.is_empty():
+		return
+
+	var hit_pos: Vector3 = hit.position
+	var cell := _terrain.world_to_cell(hit_pos)
+
+	if not data.is_valid_cell(cell.x, cell.y):
+		return
+
+	# Update brush corner for even-sized brushes
+	var local_pos := _terrain.to_local(hit_pos)
+	var cell_size := data.cell_size
+	var norm_x := (local_pos.x - cell.x * cell_size) / cell_size
+	var norm_z := (local_pos.z - cell.y * cell_size) / cell_size
+
+	var corner_dists: Array[float] = [
+		Vector2(norm_x, norm_z).length(),
+		Vector2(norm_x - 1.0, norm_z).length(),
+		Vector2(norm_x - 1.0, norm_z - 1.0).length(),
+		Vector2(norm_x, norm_z - 1.0).length(),
+	]
+
+	var min_dist := corner_dists[0]
+	_brush_corner = 0
+	for i in range(1, 4):
+		if corner_dists[i] < min_dist:
+			min_dist = corner_dists[i]
+			_brush_corner = i
+
+	# Update hovered cell for overlay drawing
+	_hovered_cell = cell
+
+	# Apply flatten to cells under brush
+	_apply_flatten_to_brush(data, cell)
+
+
+func _finish_flatten_drag() -> void:
+	if not _is_flatten_dragging or not _terrain:
+		_is_flatten_dragging = false
+		return
+
+	var data := _terrain.terrain_data
+	if not data or _flatten_affected_cells.is_empty():
+		_is_flatten_dragging = false
+		_flatten_affected_cells.clear()
+		return
+
+	# Create undo action for all affected cells
 	undo_redo.create_action("Flatten Terrain")
-	for change in changes:
-		undo_redo.add_do_method(data, "set_top_corners", change.x, change.z, change.new)
-		undo_redo.add_undo_method(data, "set_top_corners", change.x, change.z, change.old)
-	undo_redo.commit_action()
+	undo_redo.add_do_method(data, "begin_batch")
+	undo_redo.add_undo_method(data, "begin_batch")
+	for cell in _flatten_affected_cells:
+		var original: Array = _flatten_affected_cells[cell]
+		var original_typed: Array[int] = [original[0], original[1], original[2], original[3]]
+		var new_corners: Array[int] = [_flatten_target_height, _flatten_target_height, _flatten_target_height, _flatten_target_height]
+		undo_redo.add_do_method(data, "set_top_corners", cell.x, cell.y, new_corners)
+		undo_redo.add_undo_method(data, "set_top_corners", cell.x, cell.y, original_typed)
+	undo_redo.add_do_method(data, "end_batch")
+	undo_redo.add_undo_method(data, "end_batch")
+	undo_redo.commit_action(false)  # Don't execute, already applied
+
+	_is_flatten_dragging = false
+	_flatten_affected_cells.clear()
+
+
+func _cancel_flatten_drag() -> void:
+	if not _is_flatten_dragging or not _terrain:
+		_is_flatten_dragging = false
+		return
+
+	var data := _terrain.terrain_data
+	if data:
+		# Restore original heights
+		data.begin_batch()
+		for cell in _flatten_affected_cells:
+			var original: Array = _flatten_affected_cells[cell]
+			var original_typed: Array[int] = [original[0], original[1], original[2], original[3]]
+			data.set_top_corners(cell.x, cell.y, original_typed)
+		data.end_batch()
+
+	_is_flatten_dragging = false
+	_flatten_affected_cells.clear()
 
 
 func _flip_diagonal_brush_area(data: TerrainData, center: Vector2i) -> void:
@@ -716,13 +966,17 @@ func _flip_diagonal_brush_area(data: TerrainData, center: Vector2i) -> void:
 	if brush_cells.is_empty():
 		return
 
-	# Create single undo action for all cells
+	# Create single undo action for all cells with batching
 	undo_redo.create_action("Flip Diagonal")
+	undo_redo.add_do_method(data, "begin_batch")
+	undo_redo.add_undo_method(data, "begin_batch")
 	for cell in brush_cells:
 		var old_flip := data.get_diagonal_flip(cell.x, cell.y)
 		var new_flip := not old_flip
 		undo_redo.add_do_method(data, "set_diagonal_flip", cell.x, cell.y, new_flip)
 		undo_redo.add_undo_method(data, "set_diagonal_flip", cell.x, cell.y, old_flip)
+	undo_redo.add_do_method(data, "end_batch")
+	undo_redo.add_undo_method(data, "end_batch")
 	undo_redo.commit_action()
 
 
@@ -894,14 +1148,37 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 			_draw_diagonal_indicator(overlay, camera, terrain, data, cell)
 		return
 
-	# Flatten tool: highlight brush area with corner indicator
+	# Flatten tool: highlight brush area
 	if current_tool == Tool.FLATTEN:
 		var color := Color.MAGENTA
 		for cell in brush_cells:
 			_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, color)
-		# Show corner indicator on hovered cell if near a corner
-		if _hover_mode == HoverMode.CORNER and _hovered_corner >= 0:
-			_draw_corner_highlight(overlay, camera, terrain, data, display_cell, _hovered_corner, Color.WHITE)
+		return
+
+	# Mountain tool: show core area and slope preview
+	if current_tool == Tool.MOUNTAIN:
+		var core_color := Color.ORANGE if not _is_dragging else Color.GREEN
+		var slope_color := Color(0.6, 0.4, 0.2, 0.5)  # Brown for slopes
+
+		# During drag, show all affected cells
+		if _is_dragging:
+			# Draw slope cells first (behind core)
+			for cell in _drag_mountain_all_cells:
+				var key := "%d,%d" % [cell.x, cell.y]
+				var is_core := false
+				for core_cell in _drag_brush_cells:
+					if core_cell == cell:
+						is_core = true
+						break
+				if not is_core:
+					_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, slope_color)
+			# Draw core cells on top
+			for cell in _drag_brush_cells:
+				_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, core_color)
+		else:
+			# Just show core brush area when hovering
+			for cell in brush_cells:
+				_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, core_color)
 		return
 
 	# Sculpt tool: draw cell/corner highlight

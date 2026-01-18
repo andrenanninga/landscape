@@ -14,8 +14,10 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Smart corner detection** - automatically detects cell vs corner mode based on cursor position
 - **Paint tool** - paint tiles on any surface (top, north, south, east, west) with rotation/flip
 - **Flip diagonal tool** - toggle triangle diagonal direction for saddle-shaped terrain
-- **Flatten tool** - set all corners to a target height (click corner to use its height)
+- **Flatten tool** - drag to flatten terrain to a target height
+- **Mountain tool** - create hills and valleys with smooth sloped edges
 - **Adjustable brush size** - 1x1 to 9x9 brush for all terrain tools
+- **Batched updates** - efficient mesh rebuilding for large brush operations
 - **Visual feedback** - overlay-based selection highlight and sidebar status display
 
 ## Architecture
@@ -126,7 +128,7 @@ Generates ArrayMesh from TerrainData using SurfaceTool:
 
 ### TerrainEditor (RefCounted)
 Editor tool coordination:
-- Tools: SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN
+- Tools: SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN, MOUNTAIN
 - **Brush size**: Adjustable 1x1 to 9x9 (including even sizes), affects all tools
 - **Drag-based sculpting**: Click and drag to raise/lower terrain
 - **Smart corner detection**: Automatically switches between cell mode (center) and corner mode (near corners)
@@ -189,14 +191,20 @@ PBR shader with atlas-based tile texturing:
    - Useful for saddle-shaped cells where opposite corners are at different heights
    - Orange line shows current diagonal direction
 7. Use the **Flatten** tool:
-   - Click **near a corner** to flatten cells to that corner's height
-   - Click **at cell center** to flatten to the average height
-   - Magenta highlight shows affected area, white dot shows selected corner
-8. Adjust **Brush Size**:
+   - Click **near a corner** to set target height from that corner
+   - Click **at cell center** to use the average height as target
+   - Drag to flatten all cells under the brush path
+   - Magenta highlight shows affected area
+8. Use the **Mountain** tool:
+   - Click and drag to create hills (drag up) or valleys (drag down)
+   - Creates smooth sloped edges instead of sheer cliffs
+   - Slopes respect the terrain's max_slope_steps setting
+   - Ideal for creating natural-looking terrain features
+9. Adjust **Brush Size**:
    - Use the slider below the tool buttons (1-9)
-   - Affects Sculpt, Paint, and Flip tools
+   - Affects all terrain tools (Sculpt, Paint, Flip, Flatten, Mountain)
    - Larger brushes edit multiple cells at once
-9. View cell info in the sidebar dock (updates on hover and drag)
+10. View cell info in the sidebar dock (updates on hover and drag)
 
 ## Current Status
 
@@ -221,7 +229,9 @@ PBR shader with atlas-based tile texturing:
 - [x] Terrain parameters exposed directly on LandscapeTerrain node
 - [x] Brush size (1x1 to 9x9) for all tools
 - [x] Flip diagonal tool for controlling cell triangulation
-- [x] Flatten tool for setting cell heights to a target corner
+- [x] Flatten tool with drag support for setting cell heights
+- [x] Mountain tool for creating hills/valleys with smooth slopes
+- [x] Batched terrain updates for improved performance with large brushes
 
 ### Not Yet Implemented
 - [ ] Floor editing tools

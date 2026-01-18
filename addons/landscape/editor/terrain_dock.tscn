@@ -62,6 +62,13 @@ toggle_mode = true
 text = "Flatten"
 tooltip_text = "Click to flatten cells to the height of the selected corner. Click near a corner to use its height, or cell center for average."
 
+[node name="MountainButton" type="Button" parent="VBoxContainer/TerrainTools"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+text = "Mountain"
+tooltip_text = "Drag to create hills and valleys with smooth slopes. Raises/lowers center with sloped edges."
+
 [node name="BrushSection" type="HBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
 
