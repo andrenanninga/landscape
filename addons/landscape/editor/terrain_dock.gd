@@ -28,6 +28,7 @@ var _current_mode: int = 0
 @onready var _brush_size_label: Label = %BrushSizeLabel
 @onready var _paint_section: VBoxContainer = %PaintSection
 @onready var _surface_selector: OptionButton = %SurfaceSelector
+@onready var _atlas_selector: OptionButton = %AtlasSelector
 @onready var _rotate_ccw_button: Button = %RotateCCWButton
 @onready var _rotate_cw_button: Button = %RotateCWButton
 @onready var _flip_h_button: Button = %FlipHButton
@@ -94,6 +95,9 @@ func _setup_paint_controls() -> void:
 	if _surface_selector:
 		_surface_selector.item_selected.connect(_on_surface_selected)
 
+	if _atlas_selector:
+		_atlas_selector.item_selected.connect(_on_atlas_selected)
+
 	if _rotate_ccw_button:
 		_rotate_ccw_button.pressed.connect(_on_rotate_ccw)
 
@@ -138,6 +142,11 @@ func _on_paint_state_changed() -> void:
 func _on_surface_selected(index: int) -> void:
 	if terrain_editor:
 		terrain_editor.current_paint_surface = index as TerrainData.Surface
+
+
+func _on_atlas_selected(index: int) -> void:
+	if _tile_palette:
+		_tile_palette.selected_atlas = index
 
 
 func _on_rotate_ccw() -> void:
@@ -228,8 +237,33 @@ func _update_tile_palette() -> void:
 	var landscape := terrain as LandscapeTerrain
 	if landscape and landscape.tile_set:
 		_tile_palette.tile_set = landscape.tile_set
+		_update_atlas_selector(landscape.tile_set)
 	else:
 		_tile_palette.tile_set = null
+		_update_atlas_selector(null)
+
+
+func _update_atlas_selector(tile_set: TerrainTileSet) -> void:
+	if not _atlas_selector:
+		return
+
+	_atlas_selector.clear()
+
+	if not tile_set:
+		return
+
+	var atlas_count := tile_set.get_atlas_count()
+	for i in atlas_count:
+		var info := tile_set.get_atlas_info(i)
+		var label := "Atlas %d (%dx%d)" % [i, info.columns, info.rows]
+		_atlas_selector.add_item(label, i)
+
+	# Hide selector if only one atlas
+	_atlas_selector.visible = atlas_count > 1
+
+	# Sync with tile palette selection
+	if _tile_palette and _atlas_selector.item_count > 0:
+		_atlas_selector.selected = _tile_palette.selected_atlas
 
 
 func _on_hover_changed(cell: Vector2i, corner: int, mode: int) -> void:

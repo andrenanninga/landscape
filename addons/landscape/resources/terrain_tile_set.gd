@@ -4,31 +4,11 @@ extends Resource
 
 signal tileset_changed
 
-# The Godot TileSet resource (provides editor preview and tile organization)
+# The Godot TileSet resource
 @export var tileset: TileSet:
 	set(value):
 		tileset = value
 		_rebuild_tile_data()
-		tileset_changed.emit()
-
-# Which atlas source to use (usually 0)
-@export var atlas_source_id: int = 0:
-	set(value):
-		atlas_source_id = value
-		_rebuild_tile_data()
-		tileset_changed.emit()
-
-# The atlas texture (extracted from TileSet or set directly)
-@export var atlas_texture: Texture2D:
-	set(value):
-		atlas_texture = value
-		_rebuild_tile_data()
-		tileset_changed.emit()
-
-# Optional normal map atlas (must have same layout as albedo)
-@export var normal_atlas: Texture2D:
-	set(value):
-		normal_atlas = value
 		tileset_changed.emit()
 
 # PBR material properties
@@ -43,53 +23,84 @@ signal tileset_changed
 		metallic = value
 		tileset_changed.emit()
 
-# Tile size in pixels (extracted from TileSet or set manually)
+# Atlas texture (extracted from TileSet) - first atlas for backwards compatibility
+var atlas_texture: Texture2D
+
+# Tile size in pixels (extracted from TileSet)
 var tile_size: Vector2i = Vector2i(16, 16)
 
-# Atlas dimensions in tiles
+# Atlas dimensions in tiles (first atlas for backwards compatibility)
 var atlas_columns: int = 1
 var atlas_rows: int = 1
 
 # Cached UV rects for each tile (normalized 0-1)
 var _tile_uv_rects: Array[Rect2] = []
 
+# Per-atlas info: {texture, start_index, tile_count, columns, rows, tile_size}
+var _atlas_info: Array[Dictionary] = []
+
 
 func _rebuild_tile_data() -> void:
 	_tile_uv_rects.clear()
+	_atlas_info.clear()
+	atlas_texture = null
 
-	# Try to extract data from TileSet if available
-	if tileset and tileset.get_source_count() > 0:
-		var source_id := atlas_source_id if atlas_source_id < tileset.get_source_count() else 0
-		var source = tileset.get_source(source_id)
-		if source is TileSetAtlasSource:
-			var atlas_source := source as TileSetAtlasSource
-			if not atlas_texture:
-				atlas_texture = atlas_source.texture
-			tile_size = atlas_source.texture_region_size
-
-	if not atlas_texture:
+	if not tileset:
 		atlas_columns = 1
 		atlas_rows = 1
 		return
 
-	var tex_size := atlas_texture.get_size()
-	atlas_columns = maxi(1, int(tex_size.x / tile_size.x))
-	atlas_rows = maxi(1, int(tex_size.y / tile_size.y))
+	var current_index := 0
+	for source_idx in tileset.get_source_count():
+		var source_id := tileset.get_source_id(source_idx)
+		var source = tileset.get_source(source_id)
+		if source is TileSetAtlasSource:
+			var atlas_source := source as TileSetAtlasSource
+			var tex := atlas_source.texture
+			if not tex:
+				continue
 
-	# Pre-calculate normalized UV rects for all tiles
-	for y in atlas_rows:
-		for x in atlas_columns:
-			var pixel_rect := Rect2(
-				x * tile_size.x,
-				y * tile_size.y,
-				tile_size.x,
-				tile_size.y
-			)
-			var uv_rect := Rect2(
-				pixel_rect.position / tex_size,
-				pixel_rect.size / tex_size
-			)
-			_tile_uv_rects.append(uv_rect)
+			var tile_sz := atlas_source.texture_region_size
+			var tex_size := tex.get_size()
+			var cols := maxi(1, int(tex_size.x / tile_sz.x))
+			var rows := maxi(1, int(tex_size.y / tile_sz.y))
+
+			_atlas_info.append({
+				"texture": tex,
+				"start_index": current_index,
+				"tile_count": cols * rows,
+				"columns": cols,
+				"rows": rows,
+				"tile_size": tile_sz
+			})
+
+			# Add UV rects for this atlas
+			for y in rows:
+				for x in cols:
+					var pixel_rect := Rect2(
+						x * tile_sz.x,
+						y * tile_sz.y,
+						tile_sz.x,
+						tile_sz.y
+					)
+					var uv_rect := Rect2(
+						pixel_rect.position / tex_size,
+						pixel_rect.size / tex_size
+					)
+					_tile_uv_rects.append(uv_rect)
+
+			current_index += cols * rows
+
+	# Set backwards-compatible values from first atlas
+	if _atlas_info.size() > 0:
+		var first := _atlas_info[0]
+		atlas_texture = first.texture
+		tile_size = first.tile_size
+		atlas_columns = first.columns
+		atlas_rows = first.rows
+	else:
+		atlas_columns = 1
+		atlas_rows = 1
 
 
 func get_tile_count() -> int:
@@ -113,3 +124,48 @@ func get_tile_uv_size() -> Vector2:
 	if atlas_columns <= 0 or atlas_rows <= 0:
 		return Vector2.ONE
 	return Vector2(1.0 / atlas_columns, 1.0 / atlas_rows)
+
+
+# Get the number of atlas sources
+func get_atlas_count() -> int:
+	return _atlas_info.size()
+
+
+# Get info for a specific atlas
+func get_atlas_info(atlas_idx: int) -> Dictionary:
+	if atlas_idx < 0 or atlas_idx >= _atlas_info.size():
+		return {}
+	return _atlas_info[atlas_idx]
+
+
+# Get the atlas index that contains a global tile index
+func get_atlas_for_tile(tile_index: int) -> int:
+	for i in _atlas_info.size():
+		var info := _atlas_info[i]
+		var start: int = info.start_index
+		var count: int = info.tile_count
+		if tile_index >= start and tile_index < start + count:
+			return i
+	return 0
+
+
+# Get the local tile index within an atlas from a global index
+func get_local_tile_index(global_index: int) -> int:
+	var atlas_idx := get_atlas_for_tile(global_index)
+	if atlas_idx < _atlas_info.size():
+		return global_index - _atlas_info[atlas_idx].start_index
+	return global_index
+
+
+# Get the global tile index from atlas index and local tile index
+func get_global_tile_index(atlas_idx: int, local_index: int) -> int:
+	if atlas_idx < 0 or atlas_idx >= _atlas_info.size():
+		return local_index
+	return _atlas_info[atlas_idx].start_index + local_index
+
+
+# Get tile count for a specific atlas
+func get_atlas_tile_count(atlas_idx: int) -> int:
+	if atlas_idx < 0 or atlas_idx >= _atlas_info.size():
+		return 0
+	return _atlas_info[atlas_idx].tile_count

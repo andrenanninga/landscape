@@ -1,23 +1,22 @@
 shader_type spatial;
 // PBR rendering - works with Godot's lighting and environment
 
-// Tile atlas textures
-uniform sampler2D tile_atlas : source_color, filter_nearest, repeat_disable;
-uniform sampler2D tile_atlas_normal : hint_normal, filter_nearest, repeat_disable;
-uniform bool use_normal_map = false;
+// Tile atlas array texture (multiple atlas sources)
+uniform sampler2DArray tile_atlas_array : source_color, filter_nearest, repeat_disable;
 
 // Tile data texture - stores per-cell tile info
 // Layout: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
-// RGBA8 format: R = tile index low byte, G = tile index high byte, B = flags (rotation + flip)
+// RGBA8 format: R = local tile index low byte, G = local tile index high byte, B = flags (rotation + flip), A = atlas_id
 uniform sampler2D tile_data : filter_nearest, repeat_disable;
 
 // Grid configuration
 uniform ivec2 grid_size = ivec2(8, 8);
 uniform float cell_size = 1.0;
 
-// Atlas configuration
-uniform int atlas_columns = 4;
-uniform int atlas_rows = 4;
+// Atlas configuration (per-atlas arrays, max 8 atlases)
+uniform int atlas_columns[8];
+uniform int atlas_rows[8];
+uniform int atlas_count = 1;
 
 // PBR material properties
 uniform float roughness : hint_range(0.0, 1.0) = 0.8;
@@ -43,9 +42,17 @@ void vertex() {
 	surface_type = int(round(COLOR.r * 5.0));
 }
 
+// Tile data struct to hold all unpacked values
+struct TileInfo {
+	int tile_index;  // Local tile index within atlas
+	int rotation;    // 0-3
+	int flip_h;      // 0 or 1
+	int flip_v;      // 0 or 1
+	int atlas_id;    // Which atlas this tile is from
+};
+
 // Get tile data from data texture
-// Returns: x = tile_index, y = rotation (0-3), z = flip_h (0 or 1), w = flip_v (0 or 1)
-ivec4 get_tile_data(ivec2 cell, int surface) {
+TileInfo get_tile_data(ivec2 cell, int surface) {
 	// Calculate UV for tile data texture
 	vec2 data_uv = vec2(
 		(float(cell.x * 5 + surface) + 0.5) / float(grid_size.x * 5),
@@ -54,17 +61,21 @@ ivec4 get_tile_data(ivec2 cell, int surface) {
 
 	vec4 data = texture(tile_data, data_uv);
 
-	// Unpack: R = tile index low byte, G = tile index high byte, B = flags
+	// Unpack: R = local tile index low byte, G = local tile index high byte, B = flags, A = atlas_id
 	int tile_low = int(data.r * 255.0);
 	int tile_high = int(data.g * 255.0);
 	int tile_index = tile_low + (tile_high << 8);
 	int flags = int(data.b * 255.0);
+	int atlas_id = int(data.a * 255.0);
 
-	int rotation = flags & 3;           // Bits 0-1
-	int flip_h = (flags >> 2) & 1;      // Bit 2
-	int flip_v = (flags >> 3) & 1;      // Bit 3
+	TileInfo info;
+	info.tile_index = tile_index;
+	info.rotation = flags & 3;           // Bits 0-1
+	info.flip_h = (flags >> 2) & 1;      // Bit 2
+	info.flip_v = (flags >> 3) & 1;      // Bit 3
+	info.atlas_id = atlas_id;
 
-	return ivec4(tile_index, rotation, flip_h, flip_v);
+	return info;
 }
 
 // Apply rotation and flip to UV coordinates
@@ -89,12 +100,15 @@ vec2 transform_uv(vec2 uv, int rotation, bool flip_h, bool flip_v) {
 	return uv;
 }
 
-// Convert tile index + local UV to atlas UV
-vec2 get_atlas_uv(int tile_index, vec2 local_uv) {
-	int tile_x = tile_index % atlas_columns;
-	int tile_y = tile_index / atlas_columns;
+// Convert tile index + local UV to atlas UV for a specific atlas
+vec2 get_atlas_uv(int tile_index, int atlas_id, vec2 local_uv) {
+	int cols = atlas_columns[atlas_id];
+	int rows = atlas_rows[atlas_id];
 
-	vec2 tile_size = vec2(1.0 / float(atlas_columns), 1.0 / float(atlas_rows));
+	int tile_x = tile_index % cols;
+	int tile_y = tile_index / cols;
+
+	vec2 tile_size = vec2(1.0 / float(cols), 1.0 / float(rows));
 	vec2 tile_origin = vec2(float(tile_x), float(tile_y)) * tile_size;
 
 	return tile_origin + local_uv * tile_size;
@@ -142,14 +156,16 @@ void fragment() {
 	int rotation = 0;
 	bool flip_h = false;
 	bool flip_v = false;
+	int atlas_id = 0;
 
 	// Get tile data for non-floor surfaces (floor = 5)
 	if (surface < 5) {
-		ivec4 tile_info = get_tile_data(cell, surface);
-		tile_index = tile_info.x;
-		rotation = tile_info.y;
-		flip_h = tile_info.z != 0;
-		flip_v = tile_info.w != 0;
+		TileInfo tile_info = get_tile_data(cell, surface);
+		tile_index = tile_info.tile_index;
+		rotation = tile_info.rotation;
+		flip_h = tile_info.flip_h != 0;
+		flip_v = tile_info.flip_v != 0;
+		atlas_id = tile_info.atlas_id;
 	}
 
 	// Get local UV within cell
@@ -158,20 +174,14 @@ void fragment() {
 	// Apply rotation and flip transformations
 	local_uv = transform_uv(local_uv, rotation, flip_h, flip_v);
 
-	// Convert to atlas UV and sample
-	vec2 atlas_uv = get_atlas_uv(tile_index, local_uv);
-	vec4 albedo = texture(tile_atlas, atlas_uv);
+	// Convert to atlas UV and sample from the atlas array
+	vec2 atlas_uv = get_atlas_uv(tile_index, atlas_id, local_uv);
+	vec4 albedo = texture(tile_atlas_array, vec3(atlas_uv, float(atlas_id)));
 
 	// Set PBR outputs
 	ALBEDO = albedo.rgb;
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
-
-	// Normal map if available
-	if (use_normal_map) {
-		vec3 normal_sample = texture(tile_atlas_normal, atlas_uv).rgb;
-		NORMAL_MAP = normal_sample;
-	}
 
 	// Selection highlight (on top surfaces only)
 	bool is_top_face = surface == 0;

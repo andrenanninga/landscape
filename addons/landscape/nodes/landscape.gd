@@ -13,11 +13,6 @@ signal terrain_changed
 			terrain_data.data_changed.connect(_on_data_changed)
 		rebuild_mesh()
 
-@export var texture_set: TerrainTextureSet:
-	set(value):
-		texture_set = value
-		_update_material()
-
 @export var tile_set: TerrainTileSet:
 	set(value):
 		if tile_set and tile_set.tileset_changed.is_connected(_on_tileset_changed):
@@ -71,6 +66,7 @@ signal terrain_changed
 var _mesh_builder: TerrainMeshBuilder
 var _tile_data_texture: ImageTexture
 var _preview_buffer: Dictionary = {}  # "x,z,surface" -> packed_tile_value
+var _atlas_array_texture: Texture2DArray
 
 
 func _ready() -> void:
@@ -120,9 +116,10 @@ func _update_tile_data_texture() -> void:
 		return
 
 	# Create RGBA8 image: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
-	# R channel = tile index low byte (0-255)
-	# G channel = tile index high byte (0-255), supports up to 65535 tiles
+	# R channel = local tile index low byte (0-255)
+	# G channel = local tile index high byte (0-255), supports up to 65535 tiles
 	# B channel = flags (bits 0-1: rotation, bit 2: flip_h, bit 3: flip_v)
+	# A channel = atlas_id (0-255)
 	var width := terrain_data.grid_width * 5
 	var height := terrain_data.grid_depth
 
@@ -140,44 +137,118 @@ func _update_tile_data_texture() -> void:
 				else:
 					packed = tiles[surface]
 
-				var tile_index := packed & TerrainData.TILE_INDEX_MASK
+				var global_tile_index := packed & TerrainData.TILE_INDEX_MASK
 				var rotation := (packed & TerrainData.TILE_ROTATION_MASK) >> TerrainData.TILE_ROTATION_SHIFT
 				var flip_h := 1 if (packed & TerrainData.TILE_FLIP_H_BIT) != 0 else 0
 				var flip_v := 1 if (packed & TerrainData.TILE_FLIP_V_BIT) != 0 else 0
 
+				# Get atlas ID and local tile index
+				var atlas_id := tile_set.get_atlas_for_tile(global_tile_index)
+				var local_tile := tile_set.get_local_tile_index(global_tile_index)
+
 				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v
 				var flags := rotation | (flip_h << 2) | (flip_v << 3)
 
-				# Split tile index into low and high bytes
-				var tile_low := tile_index & 0xFF
-				var tile_high := (tile_index >> 8) & 0xFF
+				# Split local tile index into low and high bytes
+				var tile_low := local_tile & 0xFF
+				var tile_high := (local_tile >> 8) & 0xFF
 
 				var pixel_x := x * 5 + surface
 				# Store as normalized values (0-255 range mapped to 0-1)
-				image.set_pixel(pixel_x, z, Color(tile_low / 255.0, tile_high / 255.0, flags / 255.0, 1))
+				image.set_pixel(pixel_x, z, Color(tile_low / 255.0, tile_high / 255.0, flags / 255.0, atlas_id / 255.0))
 
 	_tile_data_texture = ImageTexture.create_from_image(image)
 
 
+func _update_atlas_array() -> void:
+	_atlas_array_texture = null
+
+	if not tile_set or tile_set.get_atlas_count() == 0:
+		return
+
+	# Collect all atlas images and convert to same format/size
+	var images: Array[Image] = []
+	var target_size := Vector2i.ZERO
+
+	# First pass: find the largest dimensions
+	for i in tile_set.get_atlas_count():
+		var info := tile_set.get_atlas_info(i)
+		var tex: Texture2D = info.texture
+		if tex:
+			var img := tex.get_image()
+			if img:
+				target_size.x = maxi(target_size.x, img.get_width())
+				target_size.y = maxi(target_size.y, img.get_height())
+
+	if target_size == Vector2i.ZERO:
+		return
+
+	# Second pass: collect images, convert format and resize if needed
+	for i in tile_set.get_atlas_count():
+		var info := tile_set.get_atlas_info(i)
+		var tex: Texture2D = info.texture
+		if tex:
+			var img := tex.get_image()
+			if img:
+				# Make a copy to avoid modifying the original
+				img = img.duplicate()
+
+				# Decompress if compressed
+				if img.is_compressed():
+					img.decompress()
+
+				# Convert to RGBA8 format for consistency
+				if img.get_format() != Image.FORMAT_RGBA8:
+					img.convert(Image.FORMAT_RGBA8)
+
+				# Clear mipmaps for consistency (we use nearest filtering anyway)
+				if img.has_mipmaps():
+					img.clear_mipmaps()
+
+				# Resize if needed (all images must be same size for Texture2DArray)
+				if img.get_width() != target_size.x or img.get_height() != target_size.y:
+					img.resize(target_size.x, target_size.y, Image.INTERPOLATE_NEAREST)
+
+				images.append(img)
+
+	if images.is_empty():
+		return
+
+	# Create Texture2DArray from all atlas textures
+	_atlas_array_texture = Texture2DArray.new()
+	var err := _atlas_array_texture.create_from_images(images)
+	if err != OK:
+		push_warning("Failed to create Texture2DArray from atlas images: %d" % err)
+		_atlas_array_texture = null
+
+
 func _update_material() -> void:
 	# Tiled rendering takes priority if tile_set is assigned
-	if tile_set and tile_set.atlas_texture:
+	if tile_set and tile_set.get_atlas_count() > 0:
 		var shader: Shader = load("res://addons/landscape/shaders/terrain_tiled.gdshader")
 		if shader:
 			var mat := ShaderMaterial.new()
 			mat.shader = shader
 
-			# Set atlas texture
-			mat.set_shader_parameter("tile_atlas", tile_set.atlas_texture)
-			mat.set_shader_parameter("atlas_columns", tile_set.atlas_columns)
-			mat.set_shader_parameter("atlas_rows", tile_set.atlas_rows)
+			# Update atlas array texture
+			_update_atlas_array()
 
-			# Set normal map if available
-			if tile_set.normal_atlas:
-				mat.set_shader_parameter("tile_atlas_normal", tile_set.normal_atlas)
-				mat.set_shader_parameter("use_normal_map", true)
-			else:
-				mat.set_shader_parameter("use_normal_map", false)
+			# Set atlas array texture
+			if _atlas_array_texture:
+				mat.set_shader_parameter("tile_atlas_array", _atlas_array_texture)
+
+			# Set per-atlas columns and rows arrays
+			var atlas_count := tile_set.get_atlas_count()
+			var columns_array: Array[int] = []
+			var rows_array: Array[int] = []
+			for i in atlas_count:
+				var info := tile_set.get_atlas_info(i)
+				columns_array.append(info.columns)
+				rows_array.append(info.rows)
+
+			mat.set_shader_parameter("atlas_columns", columns_array)
+			mat.set_shader_parameter("atlas_rows", rows_array)
+			mat.set_shader_parameter("atlas_count", atlas_count)
 
 			# Set PBR properties
 			mat.set_shader_parameter("roughness", tile_set.roughness)
@@ -196,8 +267,6 @@ func _update_material() -> void:
 			material_override = mat
 		else:
 			material_override = null
-	elif texture_set:
-		material_override = texture_set.create_material()
 	else:
 		# Apply default shader with solid colors
 		var shader: Shader = load("res://addons/landscape/shaders/terrain.gdshader")

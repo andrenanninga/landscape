@@ -3,16 +3,28 @@ class_name TilePalette
 extends Control
 
 signal tile_selected(tile_index: int)
+signal atlas_changed(atlas_index: int)
 
 var tile_set: TerrainTileSet:
 	set(value):
 		tile_set = value
+		# Reset selected atlas if needed
+		if tile_set and selected_atlas >= tile_set.get_atlas_count():
+			selected_atlas = 0
 		queue_redraw()
 
 var selected_tile: int = 0:
 	set(value):
 		if selected_tile != value:
 			selected_tile = value
+			queue_redraw()
+
+var selected_atlas: int = 0:
+	set(value):
+		if selected_atlas != value:
+			selected_atlas = value
+			pan_offset = Vector2.ZERO
+			atlas_changed.emit(selected_atlas)
 			queue_redraw()
 
 var zoom: float = 1.0:
@@ -39,15 +51,19 @@ func _draw() -> void:
 	# Draw background
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.15, 0.15, 0.15))
 
-	if not tile_set or not tile_set.atlas_texture:
+	if not tile_set or tile_set.get_atlas_count() == 0:
 		var font := ThemeDB.fallback_font
 		var font_size := ThemeDB.fallback_font_size
 		draw_string(font, Vector2(10, 20), "No tileset", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.5, 0.5, 0.5))
 		return
 
-	var atlas := tile_set.atlas_texture
-	var tile_count := tile_set.get_tile_count()
-	var columns := tile_set.atlas_columns
+	var atlas_info := tile_set.get_atlas_info(selected_atlas)
+	if atlas_info.is_empty():
+		return
+
+	var atlas: Texture2D = atlas_info.texture
+	var tile_count: int = atlas_info.tile_count
+	var columns: int = atlas_info.columns
 
 	if tile_count == 0 or columns == 0:
 		return
@@ -55,24 +71,29 @@ func _draw() -> void:
 	var tile_size := BASE_TILE_SIZE * zoom
 	var visible_rect := Rect2(Vector2.ZERO, size)
 
-	# Draw tiles
-	for i in tile_count:
-		var screen_rect := _get_tile_screen_rect(i)
+	# Get the start index for this atlas (for global tile indices)
+	var start_index: int = atlas_info.start_index
+
+	# Draw tiles (using local indices for positioning, global for selection)
+	for local_i in tile_count:
+		var global_i := start_index + local_i
+		var screen_rect := _get_tile_screen_rect(local_i)
 
 		# Cull tiles outside visible area
 		if not visible_rect.intersects(screen_rect):
 			continue
 
-		# Get UV rect for this tile
-		var uv_rect := tile_set.get_tile_uv_rect(i)
+		# Get UV rect for this tile (using global index)
+		var uv_rect := tile_set.get_tile_uv_rect(global_i)
 		var tex_size := atlas.get_size()
 		var source_rect := Rect2(uv_rect.position * tex_size, uv_rect.size * tex_size)
 
 		draw_texture_rect_region(atlas, screen_rect, source_rect)
 
-	# Draw selection highlight
-	if selected_tile >= 0 and selected_tile < tile_count:
-		var sel_rect := _get_tile_screen_rect(selected_tile)
+	# Draw selection highlight (convert selected_tile to local index for this atlas)
+	if selected_tile >= start_index and selected_tile < start_index + tile_count:
+		var local_sel := selected_tile - start_index
+		var sel_rect := _get_tile_screen_rect(local_sel)
 		if visible_rect.intersects(sel_rect):
 			draw_rect(sel_rect, Color(0.4, 0.6, 1.0, 0.3))
 			draw_rect(sel_rect, Color(0.4, 0.6, 1.0), false, 2.0)
@@ -151,21 +172,34 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 
 
-func _get_tile_screen_rect(index: int) -> Rect2:
-	if not tile_set or tile_set.atlas_columns == 0:
+# Get screen rect for a local tile index within the current atlas
+func _get_tile_screen_rect(local_index: int) -> Rect2:
+	if not tile_set or tile_set.get_atlas_count() == 0:
 		return Rect2()
 
-	var columns := tile_set.atlas_columns
-	var col := index % columns
-	var row := index / columns
+	var atlas_info := tile_set.get_atlas_info(selected_atlas)
+	if atlas_info.is_empty():
+		return Rect2()
+
+	var columns: int = atlas_info.columns
+	if columns == 0:
+		return Rect2()
+
+	var col := local_index % columns
+	var row := local_index / columns
 	var tile_size := BASE_TILE_SIZE * zoom
 
 	var pos := Vector2(col * tile_size, row * tile_size) + pan_offset
 	return Rect2(pos, Vector2(tile_size, tile_size))
 
 
+# Get global tile index at screen position
 func _get_tile_at_position(screen_pos: Vector2) -> int:
-	if not tile_set or tile_set.atlas_columns == 0:
+	if not tile_set or tile_set.get_atlas_count() == 0:
+		return -1
+
+	var atlas_info := tile_set.get_atlas_info(selected_atlas)
+	if atlas_info.is_empty():
 		return -1
 
 	var tile_size := BASE_TILE_SIZE * zoom
@@ -176,16 +210,17 @@ func _get_tile_at_position(screen_pos: Vector2) -> int:
 
 	var col := int(local_pos.x / tile_size)
 	var row := int(local_pos.y / tile_size)
-	var columns := tile_set.atlas_columns
+	var columns: int = atlas_info.columns
 
 	if col >= columns:
 		return -1
 
-	var index := row * columns + col
-	if index >= tile_set.get_tile_count():
+	var local_index := row * columns + col
+	if local_index >= atlas_info.tile_count:
 		return -1
 
-	return index
+	# Return global tile index
+	return atlas_info.start_index + local_index
 
 
 func _zoom_at_point(point: Vector2, direction: float) -> void:
@@ -206,12 +241,16 @@ func _zoom_at_point(point: Vector2, direction: float) -> void:
 
 
 func _clamp_pan() -> void:
-	if not tile_set or tile_set.atlas_columns == 0:
+	if not tile_set or tile_set.get_atlas_count() == 0:
+		return
+
+	var atlas_info := tile_set.get_atlas_info(selected_atlas)
+	if atlas_info.is_empty():
 		return
 
 	var tile_size := BASE_TILE_SIZE * zoom
-	var columns := tile_set.atlas_columns
-	var rows := ceili(float(tile_set.get_tile_count()) / columns)
+	var columns: int = atlas_info.columns
+	var rows: int = atlas_info.rows
 	var content_size := Vector2(columns * tile_size, rows * tile_size)
 
 	# Clamp so content stays within view

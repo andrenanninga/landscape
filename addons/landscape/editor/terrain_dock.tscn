@@ -159,6 +159,19 @@ size_flags_horizontal = 3
 text = "0°"
 horizontal_alignment = 2
 
+[node name="AtlasSection" type="HBoxContainer" parent="VBoxContainer/PaintSection"]
+layout_mode = 2
+
+[node name="AtlasLabel" type="Label" parent="VBoxContainer/PaintSection/AtlasSection"]
+layout_mode = 2
+text = "Atlas:"
+
+[node name="AtlasSelector" type="OptionButton" parent="VBoxContainer/PaintSection/AtlasSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Select which atlas source to paint from"
+
 [node name="TileHeader" type="HBoxContainer" parent="VBoxContainer/PaintSection"]
 layout_mode = 2
 
