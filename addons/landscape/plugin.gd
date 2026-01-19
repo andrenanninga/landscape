@@ -96,6 +96,15 @@ func _forward_3d_gui_input(viewport_camera: Camera3D, event: InputEvent) -> int:
 func _forward_3d_draw_over_viewport(overlay: Control) -> void:
 	if not _current_terrain or not _terrain_editor:
 		return
+
+	# Check if mouse is inside the 3D viewport
+	var mouse_pos := overlay.get_local_mouse_position()
+	var viewport_rect := Rect2(Vector2.ZERO, overlay.size)
+	if not viewport_rect.has_point(mouse_pos):
+		# Mouse is outside viewport - clear hover state and previews
+		_terrain_editor.clear_all_previews()
+		return
+
 	_terrain_editor.draw_overlay(overlay, _current_terrain)
 
 

@@ -8,7 +8,7 @@ uniform bool use_normal_map = false;
 
 // Tile data texture - stores per-cell tile info
 // Layout: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
-// RG8 format: R = tile index, G = flags (rotation + flip)
+// RGBA8 format: R = tile index low byte, G = tile index high byte, B = flags (rotation + flip)
 uniform sampler2D tile_data : filter_nearest, repeat_disable;
 
 // Grid configuration
@@ -54,9 +54,11 @@ ivec4 get_tile_data(ivec2 cell, int surface) {
 
 	vec4 data = texture(tile_data, data_uv);
 
-	// Unpack: R = tile index, G = flags
-	int tile_index = int(data.r * 255.0);
-	int flags = int(data.g * 255.0);
+	// Unpack: R = tile index low byte, G = tile index high byte, B = flags
+	int tile_low = int(data.r * 255.0);
+	int tile_high = int(data.g * 255.0);
+	int tile_index = tile_low + (tile_high << 8);
+	int flags = int(data.b * 255.0);
 
 	int rotation = flags & 3;           // Bits 0-1
 	int flip_h = (flags >> 2) & 1;      // Bit 2

@@ -119,13 +119,14 @@ func _update_tile_data_texture() -> void:
 		_tile_data_texture = null
 		return
 
-	# Create RG8 image: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
-	# R channel = tile index (0-255)
-	# G channel = flags (bits 0-1: rotation, bit 2: flip_h, bit 3: flip_v)
+	# Create RGBA8 image: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
+	# R channel = tile index low byte (0-255)
+	# G channel = tile index high byte (0-255), supports up to 65535 tiles
+	# B channel = flags (bits 0-1: rotation, bit 2: flip_h, bit 3: flip_v)
 	var width := terrain_data.grid_width * 5
 	var height := terrain_data.grid_depth
 
-	var image := Image.create(width, height, false, Image.FORMAT_RG8)
+	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
 
 	for z in terrain_data.grid_depth:
 		for x in terrain_data.grid_width:
@@ -147,9 +148,13 @@ func _update_tile_data_texture() -> void:
 				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v
 				var flags := rotation | (flip_h << 2) | (flip_v << 3)
 
+				# Split tile index into low and high bytes
+				var tile_low := tile_index & 0xFF
+				var tile_high := (tile_index >> 8) & 0xFF
+
 				var pixel_x := x * 5 + surface
 				# Store as normalized values (0-255 range mapped to 0-1)
-				image.set_pixel(pixel_x, z, Color(tile_index / 255.0, flags / 255.0, 0, 1))
+				image.set_pixel(pixel_x, z, Color(tile_low / 255.0, tile_high / 255.0, flags / 255.0, 1))
 
 	_tile_data_texture = ImageTexture.create_from_image(image)
 

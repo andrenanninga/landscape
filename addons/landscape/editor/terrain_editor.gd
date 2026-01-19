@@ -16,10 +16,16 @@ var undo_redo: EditorUndoRedoManager
 
 var current_tool: Tool = Tool.NONE:
 	set(value):
+		var old_tool := current_tool
 		current_tool = value
 		tool_changed.emit(value)
 		if value == Tool.NONE:
 			_clear_hover()
+		elif old_tool == Tool.PAINT and value != Tool.PAINT:
+			# Clear paint preview when switching away from paint tool
+			if _terrain:
+				_terrain.clear_preview()
+			_paint_preview_buffer.clear()
 
 # Paint tool state
 var current_paint_tile: int = 0:
@@ -107,6 +113,11 @@ func set_terrain(terrain: LandscapeTerrain) -> void:
 
 func get_hovered_surface() -> TerrainData.Surface:
 	return _hovered_surface
+
+
+func clear_all_previews() -> void:
+	# Clear hover state (which also clears paint preview)
+	_clear_hover()
 
 
 func _clear_hover() -> void:
@@ -717,6 +728,9 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 			_hover_mode = HoverMode.CELL
 			_hovered_surface = TerrainData.Surface.TOP
 			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
+		# Clear paint preview when not hovering terrain
+		if current_tool == Tool.PAINT and _terrain:
+			_terrain.clear_preview()
 		return
 
 	var hit_pos: Vector3 = hit.position

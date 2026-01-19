@@ -60,12 +60,12 @@ const FLOOR_OFFSET := 4
 const TILE_OFFSET := 8  # Start of tile data (5 surfaces: top, north, east, south, west)
 
 # Bit packing constants for tile values
-const TILE_INDEX_MASK := 0xFF        # Bits 0-7: tile index (0-255)
-const TILE_ROTATION_MASK := 0x300    # Bits 8-9: rotation (0-3)
-const TILE_ROTATION_SHIFT := 8
-const TILE_FLIP_H_BIT := 0x400       # Bit 10: flip horizontal
-const TILE_FLIP_V_BIT := 0x800       # Bit 11: flip vertical
-const DIAGONAL_FLIP_BIT := 0x1000    # Bit 12: flip diagonal (stored in top tile only)
+const TILE_INDEX_MASK := 0xFFFF      # Bits 0-15: tile index (0-65535)
+const TILE_ROTATION_MASK := 0x30000  # Bits 16-17: rotation (0-3)
+const TILE_ROTATION_SHIFT := 16
+const TILE_FLIP_H_BIT := 0x40000     # Bit 18: flip horizontal
+const TILE_FLIP_V_BIT := 0x80000     # Bit 19: flip vertical
+const DIAGONAL_FLIP_BIT := 0x100000  # Bit 20: flip diagonal (stored in top tile only)
 
 
 func _init() -> void:
