@@ -159,6 +159,7 @@ PBR shader with atlas-based tile texturing:
 - **Per-surface tiles** - Each cell face can have different tile
 - **Tile transformations** - Rotation (0°/90°/180°/270°) and flip (H/V)
 - **Tile data texture** - GPU-side storage of per-cell tile info
+- **Animated tiles** - Automatic animation using TileSet animation data (frame count, speed)
 - **Surface detection** - Automatic top/wall detection from face normals
 - **Paint preview** - Shader-based preview for accurate wall texture repeating
 - **Selection highlight** - Visual feedback for hovered cell (top faces)
@@ -232,6 +233,7 @@ PBR shader with atlas-based tile texturing:
 - [x] Flatten tool with drag support for setting cell heights
 - [x] Mountain tool for creating hills/valleys with smooth slopes
 - [x] Batched terrain updates for improved performance with large brushes
+- [x] Animated tile support (uses TileSet animation properties)
 
 ### Not Yet Implemented
 - [ ] Floor editing tools

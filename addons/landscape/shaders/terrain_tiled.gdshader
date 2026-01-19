@@ -6,7 +6,7 @@ uniform sampler2DArray tile_atlas_array : source_color, filter_nearest, repeat_d
 
 // Tile data texture - stores per-cell tile info
 // Layout: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
-// RGBA8 format: R = local tile index low byte, G = local tile index high byte, B = flags (rotation + flip), A = atlas_id
+// RGBA8 format: R = atlas tile X coord, G = atlas tile Y coord, B = flags (rotation + flip), A = atlas_id
 uniform sampler2D tile_data : filter_nearest, repeat_disable;
 
 // Grid configuration
@@ -17,6 +17,12 @@ uniform float cell_size = 1.0;
 uniform int atlas_columns[8];
 uniform int atlas_rows[8];
 uniform int atlas_count = 1;
+
+// Animation data texture
+// Layout: width = max_cols * max_rows, height = atlas_count
+// RGBA8: R = frame count, G = anim columns, B = speed (scaled by 25.5), A = reserved
+uniform sampler2D animation_data : filter_nearest, repeat_disable;
+uniform ivec2 anim_data_size = ivec2(256, 8);
 
 // PBR material properties
 uniform float roughness : hint_range(0.0, 1.0) = 0.8;
@@ -44,7 +50,8 @@ void vertex() {
 
 // Tile data struct to hold all unpacked values
 struct TileInfo {
-	int tile_index;  // Local tile index within atlas
+	int tile_x;      // Atlas tile X coordinate
+	int tile_y;      // Atlas tile Y coordinate
 	int rotation;    // 0-3
 	int flip_h;      // 0 or 1
 	int flip_v;      // 0 or 1
@@ -61,15 +68,15 @@ TileInfo get_tile_data(ivec2 cell, int surface) {
 
 	vec4 data = texture(tile_data, data_uv);
 
-	// Unpack: R = local tile index low byte, G = local tile index high byte, B = flags, A = atlas_id
-	int tile_low = int(data.r * 255.0);
-	int tile_high = int(data.g * 255.0);
-	int tile_index = tile_low + (tile_high << 8);
+	// Unpack: R = atlas tile X, G = atlas tile Y, B = flags, A = atlas_id
+	int tile_x = int(data.r * 255.0);
+	int tile_y = int(data.g * 255.0);
 	int flags = int(data.b * 255.0);
 	int atlas_id = int(data.a * 255.0);
 
 	TileInfo info;
-	info.tile_index = tile_index;
+	info.tile_x = tile_x;
+	info.tile_y = tile_y;
 	info.rotation = flags & 3;           // Bits 0-1
 	info.flip_h = (flags >> 2) & 1;      // Bit 2
 	info.flip_v = (flags >> 3) & 1;      // Bit 3
@@ -100,13 +107,33 @@ vec2 transform_uv(vec2 uv, int rotation, bool flip_h, bool flip_v) {
 	return uv;
 }
 
-// Convert tile index + local UV to atlas UV for a specific atlas
-vec2 get_atlas_uv(int tile_index, int atlas_id, vec2 local_uv) {
+// Animation info struct
+struct AnimInfo {
+	int frame_count;
+	int anim_columns;
+	float speed;
+};
+
+// Get animation info for a tile from the animation data texture
+AnimInfo get_animation_info(int tile_x, int tile_y, int atlas_id, int atlas_cols) {
+	int linear_idx = tile_y * atlas_cols + tile_x;
+	vec2 anim_uv = vec2(
+		(float(linear_idx) + 0.5) / float(anim_data_size.x),
+		(float(atlas_id) + 0.5) / float(anim_data_size.y)
+	);
+	vec4 data = texture(animation_data, anim_uv);
+
+	AnimInfo info;
+	info.frame_count = int(data.r * 255.0);
+	info.anim_columns = int(data.g * 255.0);
+	info.speed = data.b * 25.5;
+	return info;
+}
+
+// Convert tile coords + local UV to atlas UV for a specific atlas
+vec2 get_atlas_uv(int tile_x, int tile_y, int atlas_id, vec2 local_uv) {
 	int cols = atlas_columns[atlas_id];
 	int rows = atlas_rows[atlas_id];
-
-	int tile_x = tile_index % cols;
-	int tile_y = tile_index / cols;
 
 	vec2 tile_size = vec2(1.0 / float(cols), 1.0 / float(rows));
 	vec2 tile_origin = vec2(float(tile_x), float(tile_y)) * tile_size;
@@ -151,8 +178,9 @@ void fragment() {
 	ivec2 cell = ivec2(floor(adjusted_pos.xz / cell_size));
 	cell = clamp(cell, ivec2(0), grid_size - ivec2(1));
 
-	// For floor surfaces, use tile 0 with no transformations
-	int tile_index = 0;
+	// For floor surfaces, use tile (0,0) with no transformations
+	int tile_x = 0;
+	int tile_y = 0;
 	int rotation = 0;
 	bool flip_h = false;
 	bool flip_v = false;
@@ -161,11 +189,20 @@ void fragment() {
 	// Get tile data for non-floor surfaces (floor = 5)
 	if (surface < 5) {
 		TileInfo tile_info = get_tile_data(cell, surface);
-		tile_index = tile_info.tile_index;
+		tile_x = tile_info.tile_x;
+		tile_y = tile_info.tile_y;
 		rotation = tile_info.rotation;
 		flip_h = tile_info.flip_h != 0;
 		flip_v = tile_info.flip_v != 0;
 		atlas_id = tile_info.atlas_id;
+
+		// Check for animation and offset tile_x if animated
+		AnimInfo anim = get_animation_info(tile_x, tile_y, atlas_id, atlas_columns[atlas_id]);
+		if (anim.frame_count > 1) {
+			float anim_time = TIME * anim.speed;
+			int current_frame = int(mod(anim_time, float(anim.frame_count)));
+			tile_x += current_frame;  // Frames are arranged horizontally
+		}
 	}
 
 	// Get local UV within cell
@@ -175,7 +212,7 @@ void fragment() {
 	local_uv = transform_uv(local_uv, rotation, flip_h, flip_v);
 
 	// Convert to atlas UV and sample from the atlas array
-	vec2 atlas_uv = get_atlas_uv(tile_index, atlas_id, local_uv);
+	vec2 atlas_uv = get_atlas_uv(tile_x, tile_y, atlas_id, local_uv);
 	vec4 albedo = texture(tile_atlas_array, vec3(atlas_uv, float(atlas_id)));
 
 	// Set PBR outputs

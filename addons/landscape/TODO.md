@@ -19,6 +19,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Animated tile support** - Tiles with animation data (frame count, columns, speed) animate automatically using TIME uniform
 - [x] **Mountain tool** - Create hills/valleys with smooth sloped edges that respect max_slope_steps
 - [x] **Flatten tool drag support** - Click and drag to flatten terrain along brush path
 - [x] **Batched terrain updates** - TerrainData.begin_batch/end_batch for efficient large brush operations

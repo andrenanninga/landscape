@@ -67,6 +67,7 @@ var _mesh_builder: TerrainMeshBuilder
 var _tile_data_texture: ImageTexture
 var _preview_buffer: Dictionary = {}  # "x,z,surface" -> packed_tile_value
 var _atlas_array_texture: Texture2DArray
+var _animation_data_texture: ImageTexture
 
 
 func _ready() -> void:
@@ -116,8 +117,8 @@ func _update_tile_data_texture() -> void:
 		return
 
 	# Create RGBA8 image: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
-	# R channel = local tile index low byte (0-255)
-	# G channel = local tile index high byte (0-255), supports up to 65535 tiles
+	# R channel = atlas tile X coordinate (0-255)
+	# G channel = atlas tile Y coordinate (0-255)
 	# B channel = flags (bits 0-1: rotation, bit 2: flip_h, bit 3: flip_v)
 	# A channel = atlas_id (0-255)
 	var width := terrain_data.grid_width * 5
@@ -142,20 +143,16 @@ func _update_tile_data_texture() -> void:
 				var flip_h := 1 if (packed & TerrainData.TILE_FLIP_H_BIT) != 0 else 0
 				var flip_v := 1 if (packed & TerrainData.TILE_FLIP_V_BIT) != 0 else 0
 
-				# Get atlas ID and local tile index
+				# Get atlas ID and actual atlas coordinates
 				var atlas_id := tile_set.get_atlas_for_tile(global_tile_index)
-				var local_tile := tile_set.get_local_tile_index(global_tile_index)
+				var atlas_coords := tile_set.get_tile_atlas_coords_global(global_tile_index)
 
 				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v
 				var flags := rotation | (flip_h << 2) | (flip_v << 3)
 
-				# Split local tile index into low and high bytes
-				var tile_low := local_tile & 0xFF
-				var tile_high := (local_tile >> 8) & 0xFF
-
 				var pixel_x := x * 5 + surface
 				# Store as normalized values (0-255 range mapped to 0-1)
-				image.set_pixel(pixel_x, z, Color(tile_low / 255.0, tile_high / 255.0, flags / 255.0, atlas_id / 255.0))
+				image.set_pixel(pixel_x, z, Color(atlas_coords.x / 255.0, atlas_coords.y / 255.0, flags / 255.0, atlas_id / 255.0))
 
 	_tile_data_texture = ImageTexture.create_from_image(image)
 
@@ -222,6 +219,65 @@ func _update_atlas_array() -> void:
 		_atlas_array_texture = null
 
 
+func _update_animation_data_texture() -> void:
+	_animation_data_texture = null
+
+	if not tile_set or tile_set.get_atlas_count() == 0:
+		return
+
+	# Find max dimensions needed across all atlases
+	var max_cols := 1
+	var max_rows := 1
+	for i in tile_set.get_atlas_count():
+		var info := tile_set.get_atlas_info(i)
+		max_cols = maxi(max_cols, info.columns)
+		max_rows = maxi(max_rows, info.rows)
+
+	var atlas_count := tile_set.get_atlas_count()
+
+	# Create RGBA8 image: width = max_cols * max_rows, height = atlas_count
+	# R = frame count (1 = not animated)
+	# G = animation columns (frames per row)
+	# B = animation speed (scaled: value * 10 = actual speed, so 25.5 max)
+	# A = reserved
+	var width := max_cols * max_rows
+	var height := atlas_count
+
+	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
+
+	# Initialize all pixels to frame_count=1 (no animation)
+	# Using 1.0/255.0 for frame_count=1, columns=1, speed=0
+	image.fill(Color(1.0 / 255.0, 1.0 / 255.0, 0.0, 0.0))
+
+	# Fill in animation data for animated tiles
+	var anim_data := tile_set.get_animation_data()
+	for key: String in anim_data:
+		var parts: PackedStringArray = key.split(",")
+		var atlas_id := int(parts[0])
+		var tile_x := int(parts[1])
+		var tile_y := int(parts[2])
+
+		var info := tile_set.get_atlas_info(atlas_id)
+		var cols: int = info.columns
+
+		# Linear index for this tile position
+		var linear_idx := tile_y * cols + tile_x
+
+		var data: Dictionary = anim_data[key]
+		var frames: int = data.frames
+		var anim_columns: int = data.columns
+		var speed: float = data.speed
+
+		# Encode values (frame_count and columns as direct values, speed scaled)
+		var r := float(frames) / 255.0
+		var g := float(anim_columns) / 255.0
+		var b := speed / 25.5  # Scale so max readable speed is 25.5
+
+		image.set_pixel(linear_idx, atlas_id, Color(r, g, b, 0.0))
+
+	_animation_data_texture = ImageTexture.create_from_image(image)
+
+
 func _update_material() -> void:
 	# Tiled rendering takes priority if tile_set is assigned
 	if tile_set and tile_set.get_atlas_count() > 0:
@@ -236,6 +292,19 @@ func _update_material() -> void:
 			# Set atlas array texture
 			if _atlas_array_texture:
 				mat.set_shader_parameter("tile_atlas_array", _atlas_array_texture)
+
+			# Update and set animation data texture
+			_update_animation_data_texture()
+			if _animation_data_texture:
+				mat.set_shader_parameter("animation_data", _animation_data_texture)
+				# Calculate dimensions for shader
+				var max_cols := 1
+				var max_rows := 1
+				for i in tile_set.get_atlas_count():
+					var info := tile_set.get_atlas_info(i)
+					max_cols = maxi(max_cols, info.columns)
+					max_rows = maxi(max_rows, info.rows)
+				mat.set_shader_parameter("anim_data_size", Vector2i(max_cols * max_rows, tile_set.get_atlas_count()))
 
 			# Set per-atlas columns and rows arrays
 			var atlas_count := tile_set.get_atlas_count()

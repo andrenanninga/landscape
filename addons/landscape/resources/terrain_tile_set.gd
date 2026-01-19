@@ -36,13 +36,18 @@ var atlas_rows: int = 1
 # Cached UV rects for each tile (normalized 0-1)
 var _tile_uv_rects: Array[Rect2] = []
 
-# Per-atlas info: {texture, start_index, tile_count, columns, rows, tile_size}
+# Per-atlas info: {texture, start_index, tile_count, columns, rows, tile_size, tiles}
+# tiles is Array[Vector2i] of atlas coordinates for each valid tile
 var _atlas_info: Array[Dictionary] = []
+
+# Animation data: "atlas_idx,tile_x,tile_y" -> {frames, columns, speed}
+var _animation_data: Dictionary = {}
 
 
 func _rebuild_tile_data() -> void:
 	_tile_uv_rects.clear()
 	_atlas_info.clear()
+	_animation_data.clear()
 	atlas_texture = null
 
 	if not tileset:
@@ -65,31 +70,57 @@ func _rebuild_tile_data() -> void:
 			var cols := maxi(1, int(tex_size.x / tile_sz.x))
 			var rows := maxi(1, int(tex_size.y / tile_sz.y))
 
+			# Get only the tiles that are actually defined in the atlas
+			var valid_tiles: Array[Vector2i] = []
+			for i in atlas_source.get_tiles_count():
+				var coords := atlas_source.get_tile_id(i)
+				valid_tiles.append(coords)
+
+			# Sort tiles by row then column for consistent ordering
+			valid_tiles.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+				if a.y != b.y:
+					return a.y < b.y
+				return a.x < b.x
+			)
+
+			# Extract animation data for tiles with multiple frames
+			for coords in valid_tiles:
+				var frame_count := atlas_source.get_tile_animation_frames_count(coords)
+				if frame_count > 1:
+					var anim_columns := atlas_source.get_tile_animation_columns(coords)
+					var anim_speed := atlas_source.get_tile_animation_speed(coords)
+					var key := "%d,%d,%d" % [_atlas_info.size(), coords.x, coords.y]
+					_animation_data[key] = {
+						"frames": frame_count,
+						"columns": anim_columns,
+						"speed": anim_speed
+					}
+
 			_atlas_info.append({
 				"texture": tex,
 				"start_index": current_index,
-				"tile_count": cols * rows,
+				"tile_count": valid_tiles.size(),
 				"columns": cols,
 				"rows": rows,
-				"tile_size": tile_sz
+				"tile_size": tile_sz,
+				"tiles": valid_tiles
 			})
 
-			# Add UV rects for this atlas
-			for y in rows:
-				for x in cols:
-					var pixel_rect := Rect2(
-						x * tile_sz.x,
-						y * tile_sz.y,
-						tile_sz.x,
-						tile_sz.y
-					)
-					var uv_rect := Rect2(
-						pixel_rect.position / tex_size,
-						pixel_rect.size / tex_size
-					)
-					_tile_uv_rects.append(uv_rect)
+			# Add UV rects for valid tiles only
+			for coords in valid_tiles:
+				var pixel_rect := Rect2(
+					coords.x * tile_sz.x,
+					coords.y * tile_sz.y,
+					tile_sz.x,
+					tile_sz.y
+				)
+				var uv_rect := Rect2(
+					pixel_rect.position / tex_size,
+					pixel_rect.size / tex_size
+				)
+				_tile_uv_rects.append(uv_rect)
 
-			current_index += cols * rows
+			current_index += valid_tiles.size()
 
 	# Set backwards-compatible values from first atlas
 	if _atlas_info.size() > 0:
@@ -169,3 +200,32 @@ func get_atlas_tile_count(atlas_idx: int) -> int:
 	if atlas_idx < 0 or atlas_idx >= _atlas_info.size():
 		return 0
 	return _atlas_info[atlas_idx].tile_count
+
+
+# Get atlas coordinates for a local tile index within an atlas
+func get_tile_atlas_coords_for_atlas(atlas_idx: int, local_index: int) -> Vector2i:
+	if atlas_idx < 0 or atlas_idx >= _atlas_info.size():
+		return Vector2i.ZERO
+	var tiles: Array = _atlas_info[atlas_idx].tiles
+	if local_index < 0 or local_index >= tiles.size():
+		return Vector2i.ZERO
+	return tiles[local_index]
+
+
+# Get atlas coordinates for a global tile index
+func get_tile_atlas_coords_global(global_index: int) -> Vector2i:
+	var atlas_idx := get_atlas_for_tile(global_index)
+	var local_idx := get_local_tile_index(global_index)
+	return get_tile_atlas_coords_for_atlas(atlas_idx, local_idx)
+
+
+# Get the valid tiles array for an atlas
+func get_atlas_tiles(atlas_idx: int) -> Array:
+	if atlas_idx < 0 or atlas_idx >= _atlas_info.size():
+		return []
+	return _atlas_info[atlas_idx].tiles
+
+
+# Get animation data dictionary
+func get_animation_data() -> Dictionary:
+	return _animation_data
