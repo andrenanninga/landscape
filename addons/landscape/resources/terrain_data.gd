@@ -13,6 +13,9 @@ enum Surface { TOP = 0, NORTH = 1, EAST = 2, SOUTH = 3, WEST = 4 }
 # Tile rotation values
 enum Rotation { ROT_0 = 0, ROT_90 = 1, ROT_180 = 2, ROT_270 = 3 }
 
+# Wall alignment modes (how tiles are positioned vertically on walls)
+enum WallAlign { WORLD = 0, TOP = 1, BOTTOM = 2 }
+
 # Grid configuration
 var _skip_resize: bool = false
 var _batch_mode: bool = false
@@ -66,6 +69,8 @@ const TILE_ROTATION_SHIFT := 16
 const TILE_FLIP_H_BIT := 0x40000     # Bit 18: flip horizontal
 const TILE_FLIP_V_BIT := 0x80000     # Bit 19: flip vertical
 const DIAGONAL_FLIP_BIT := 0x100000  # Bit 20: flip diagonal (stored in top tile only)
+const TILE_WALL_ALIGN_MASK := 0x300000   # Bits 20-21: wall alignment mode (for wall tiles)
+const TILE_WALL_ALIGN_SHIFT := 20
 
 
 func _init() -> void:
@@ -202,13 +207,14 @@ func set_floor_corners(x: int, z: int, corners: Array[int]) -> void:
 
 
 # Tile packing/unpacking utilities
-static func pack_tile(tile_index: int, rotation: Rotation = Rotation.ROT_0, flip_h: bool = false, flip_v: bool = false) -> int:
+static func pack_tile(tile_index: int, rotation: Rotation = Rotation.ROT_0, flip_h: bool = false, flip_v: bool = false, wall_align: WallAlign = WallAlign.WORLD) -> int:
 	var packed := tile_index & TILE_INDEX_MASK
 	packed |= (rotation << TILE_ROTATION_SHIFT)
 	if flip_h:
 		packed |= TILE_FLIP_H_BIT
 	if flip_v:
 		packed |= TILE_FLIP_V_BIT
+	packed |= (wall_align << TILE_WALL_ALIGN_SHIFT)
 	return packed
 
 
@@ -218,6 +224,7 @@ static func unpack_tile(packed: int) -> Dictionary:
 		"rotation": (packed & TILE_ROTATION_MASK) >> TILE_ROTATION_SHIFT,
 		"flip_h": (packed & TILE_FLIP_H_BIT) != 0,
 		"flip_v": (packed & TILE_FLIP_V_BIT) != 0,
+		"wall_align": (packed & TILE_WALL_ALIGN_MASK) >> TILE_WALL_ALIGN_SHIFT,
 	}
 
 

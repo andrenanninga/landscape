@@ -35,10 +35,11 @@ Cell[x,z]:
   top_corners   = [NW, NE, SE, SW]   # Top surface heights
   floor_corners = [NW, NE, SE, SW]   # Floor surface heights
   surfaces[5]:                        # Per-surface tile data
-    tile_index  = int (0-255)        # Index into tile atlas
+    tile_index  = int (0-65535)      # Index into tile atlas
     rotation    = int (0-3)          # 0°, 90°, 180°, 270° clockwise
     flip_h      = bool               # Horizontal flip
     flip_v      = bool               # Vertical flip
+    wall_align  = int (0-2)          # Wall alignment: 0=World, 1=Top, 2=Bottom
 ```
 
 ### Mesh Generation
@@ -188,6 +189,10 @@ PBR shader with atlas-based tile texturing:
    - **Right-click** on a painted cell to pick its tile (eyedropper)
    - **Hold Shift** while painting to lock to one surface type (e.g., only paint north walls)
    - Enable **Random mode** (Rnd button) to paint tiles with random rotation and flipping
+   - Use **Wall alignment** dropdown to control how tiles are positioned on walls:
+     - **World**: Tiles align based on world Y position (seamless tiling across walls at same height)
+     - **Top**: Tiles anchored at wall top edge (follows slope, may cut off at bottom)
+     - **Bottom**: Tiles anchored at wall bottom edge (follows slope, may cut off at top)
    - Tile preview shows exactly how the painted result will look (including on walls)
    - Status bar shows which surface is being hovered
 6. Use the **Flip** tool:
@@ -240,6 +245,7 @@ PBR shader with atlas-based tile texturing:
 - [x] Paint eyedropper (right-click to pick tile from painted cell)
 - [x] Random paint mode (randomize rotation and flipping per tile)
 - [x] Surface lock (hold Shift to paint only on one surface type)
+- [x] Wall tile alignment modes (World/Top/Bottom) for controlling vertical tile positioning on walls
 
 ### Not Yet Implemented
 - [ ] Floor editing tools

@@ -63,6 +63,12 @@ var current_paint_random: bool = false:
 		paint_state_changed.emit()
 		_update_paint_preview()
 
+var current_paint_wall_align: TerrainData.WallAlign = TerrainData.WallAlign.WORLD:
+	set(value):
+		current_paint_wall_align = value
+		paint_state_changed.emit()
+		_update_paint_preview()
+
 # Brush size (1 = 1x1, 2 = 2x2, 3 = 3x3, etc.)
 var brush_size: int = 1:
 	set(value):
@@ -1110,9 +1116,9 @@ func _get_paint_packed(cell: Vector2i, surface: TerrainData.Surface) -> int:
 		var rotation := rng.randi_range(0, 3) as TerrainData.Rotation
 		var flip_h := rng.randi_range(0, 1) == 1
 		var flip_v := rng.randi_range(0, 1) == 1
-		return TerrainData.pack_tile(current_paint_tile, rotation, flip_h, flip_v)
+		return TerrainData.pack_tile(current_paint_tile, rotation, flip_h, flip_v, current_paint_wall_align)
 	else:
-		return TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
+		return TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v, current_paint_wall_align)
 
 
 func _pick_tile_at_hover() -> bool:
@@ -1132,6 +1138,7 @@ func _pick_tile_at_hover() -> bool:
 	current_paint_rotation = tile_info.rotation as TerrainData.Rotation
 	current_paint_flip_h = tile_info.flip_h
 	current_paint_flip_v = tile_info.flip_v
+	current_paint_wall_align = tile_info.wall_align as TerrainData.WallAlign
 
 	return true
 

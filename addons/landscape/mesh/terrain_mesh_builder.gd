@@ -246,20 +246,49 @@ func _add_wall_quad(top1: Vector3, top2: Vector3, bottom1: Vector3, bottom2: Vec
 	var uv_bottom1 := Vector2(0.0, bottom1.y * uv_scale)
 	var uv_bottom2 := Vector2(1.0, bottom2.y * uv_scale)
 
+	# Store per-vertex wall bounds in UV2 for wall alignment shader calculations
+	# UV2.x = wall top Y at this vertex's horizontal position
+	# UV2.y = wall bottom Y at this vertex's horizontal position
+	# This allows proper interpolation across sloped walls
+	var bounds1 := Vector2(top1.y, bottom1.y)  # Left edge bounds
+	var bounds2 := Vector2(top2.y, bottom2.y)  # Right edge bounds
+
 	# Two triangles for quad - reversed winding for outward facing
-	_add_triangle(top1, bottom2, top2, uv_top1, uv_bottom2, uv_top2, surface_type)
-	_add_triangle(top1, bottom1, bottom2, uv_top1, uv_bottom1, uv_bottom2, surface_type)
+	# Triangle 1: top1, bottom2, top2
+	_add_triangle_with_uv2(top1, bottom2, top2, uv_top1, uv_bottom2, uv_top2, bounds1, bounds2, bounds2, surface_type)
+	# Triangle 2: top1, bottom1, bottom2
+	_add_triangle_with_uv2(top1, bottom1, bottom2, uv_top1, uv_bottom1, uv_bottom2, bounds1, bounds1, bounds2, surface_type)
 
 
-func _add_triangle(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2, surface_type: int = SURFACE_TOP) -> void:
+func _add_triangle_with_uv2(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2, uv2_1: Vector2, uv2_2: Vector2, uv2_3: Vector2, surface_type: int) -> void:
 	# Encode surface type in vertex color (R channel: 0-5 normalized to 0-1)
 	var surface_color := Color(float(surface_type) / 5.0, 0.0, 0.0, 1.0)
 	_st.set_color(surface_color)
 	_st.set_uv(uv1)
+	_st.set_uv2(uv2_1)
 	_st.add_vertex(v1)
 	_st.set_color(surface_color)
 	_st.set_uv(uv2)
+	_st.set_uv2(uv2_2)
 	_st.add_vertex(v2)
 	_st.set_color(surface_color)
 	_st.set_uv(uv3)
+	_st.set_uv2(uv2_3)
+	_st.add_vertex(v3)
+
+
+func _add_triangle(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2, surface_type: int = SURFACE_TOP, uv2_data: Vector2 = Vector2.ZERO) -> void:
+	# Encode surface type in vertex color (R channel: 0-5 normalized to 0-1)
+	var surface_color := Color(float(surface_type) / 5.0, 0.0, 0.0, 1.0)
+	_st.set_color(surface_color)
+	_st.set_uv(uv1)
+	_st.set_uv2(uv2_data)
+	_st.add_vertex(v1)
+	_st.set_color(surface_color)
+	_st.set_uv(uv2)
+	_st.set_uv2(uv2_data)
+	_st.add_vertex(v2)
+	_st.set_color(surface_color)
+	_st.set_uv(uv3)
+	_st.set_uv2(uv2_data)
 	_st.add_vertex(v3)

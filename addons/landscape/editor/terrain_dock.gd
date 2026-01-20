@@ -32,6 +32,7 @@ var _current_mode: int = 0
 @onready var _flip_v_button: Button = %FlipVButton
 @onready var _random_button: Button = %RandomButton
 @onready var _rotation_label: Label = %RotationLabel
+@onready var _wall_align_selector: OptionButton = %WallAlignSelector
 @onready var _tile_palette: TilePalette = %TilePalette
 @onready var _zoom_in_button: Button = %ZoomInButton
 @onready var _zoom_out_button: Button = %ZoomOutButton
@@ -107,6 +108,13 @@ func _setup_paint_controls() -> void:
 	if _random_button:
 		_random_button.toggled.connect(_on_random_toggled)
 
+	if _wall_align_selector:
+		_wall_align_selector.clear()
+		_wall_align_selector.add_item("World", TerrainData.WallAlign.WORLD)
+		_wall_align_selector.add_item("Top", TerrainData.WallAlign.TOP)
+		_wall_align_selector.add_item("Bottom", TerrainData.WallAlign.BOTTOM)
+		_wall_align_selector.item_selected.connect(_on_wall_align_selected)
+
 	if _zoom_in_button:
 		_zoom_in_button.pressed.connect(_on_zoom_in)
 
@@ -163,6 +171,11 @@ func _on_random_toggled(pressed: bool) -> void:
 		terrain_editor.current_paint_random = pressed
 
 
+func _on_wall_align_selected(index: int) -> void:
+	if terrain_editor:
+		terrain_editor.current_paint_wall_align = index as TerrainData.WallAlign
+
+
 func _on_tile_selected(tile_index: int) -> void:
 	if terrain_editor:
 		terrain_editor.current_paint_tile = tile_index
@@ -193,6 +206,9 @@ func _update_paint_controls() -> void:
 	if _rotation_label:
 		var rotation_degrees: int = terrain_editor.current_paint_rotation * 90
 		_rotation_label.text = "%d°" % rotation_degrees
+
+	if _wall_align_selector:
+		_wall_align_selector.selected = terrain_editor.current_paint_wall_align
 
 
 func _update_tile_selection() -> void:

@@ -39,6 +39,7 @@ uniform float corner_highlight_size : hint_range(0.2, 0.7) = 0.5;
 varying vec3 world_position;
 varying vec3 local_position;
 varying flat int surface_type;
+varying vec2 wall_bounds;  // UV2: x = wall top Y, y = wall bottom Y (for wall alignment)
 
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -46,6 +47,8 @@ void vertex() {
 	// Decode surface type from vertex color (R channel: 0-5 normalized to 0-1)
 	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor
 	surface_type = int(round(COLOR.r * 5.0));
+	// Pass wall bounds from UV2 (used for wall alignment calculations)
+	wall_bounds = UV2;
 }
 
 // Tile data struct to hold all unpacked values
@@ -56,6 +59,7 @@ struct TileInfo {
 	int flip_h;      // 0 or 1
 	int flip_v;      // 0 or 1
 	int atlas_id;    // Which atlas this tile is from
+	int wall_align;  // 0=world, 1=top, 2=bottom (for wall surfaces)
 };
 
 // Get tile data from data texture
@@ -80,6 +84,7 @@ TileInfo get_tile_data(ivec2 cell, int surface) {
 	info.rotation = flags & 3;           // Bits 0-1
 	info.flip_h = (flags >> 2) & 1;      // Bit 2
 	info.flip_v = (flags >> 3) & 1;      // Bit 3
+	info.wall_align = (flags >> 4) & 3;  // Bits 4-5 (0=world, 1=top, 2=bottom)
 	info.atlas_id = atlas_id;
 
 	return info;
@@ -143,17 +148,42 @@ vec2 get_atlas_uv(int tile_x, int tile_y, int atlas_id, vec2 local_uv) {
 
 // Get local UV coordinates within a cell based on surface type
 // Surface types: 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor
-vec2 get_surface_uv(vec3 pos, int surface) {
+// align_mode: 0=world, 1=top, 2=bottom (only used for wall surfaces)
+// bounds: x=wall_top_y, y=wall_bottom_y (only used for wall surfaces)
+vec2 get_surface_uv(vec3 pos, int surface, int align_mode, vec2 bounds) {
 	if (surface == 0 || surface == 5) {
 		// Top/floor surface - use XZ plane
 		return fract(pos.xz / cell_size);
-	} else if (surface == 1 || surface == 3) {
-		// North/South walls - use XY plane
-		return vec2(fract(pos.x / cell_size), fract(pos.y / cell_size));
-	} else {
-		// East/West walls - use ZY plane
-		return vec2(fract(pos.z / cell_size), fract(pos.y / cell_size));
 	}
+
+	// Wall surfaces - calculate horizontal and vertical UV
+	float h_uv;
+	if (surface == 1 || surface == 3) {
+		// North/South walls - use X for horizontal
+		h_uv = fract(pos.x / cell_size);
+	} else {
+		// East/West walls - use Z for horizontal
+		h_uv = fract(pos.z / cell_size);
+	}
+
+	// Calculate vertical UV based on wall alignment mode
+	// All modes render right-side-up (V decreases as Y increases)
+	float v_uv;
+	float wall_top = bounds.x;
+	float wall_bottom = bounds.y;
+
+	if (align_mode == 1) {
+		// Top alignment: tile anchored at wall top
+		v_uv = fract((wall_top - pos.y) / cell_size);
+	} else if (align_mode == 2) {
+		// Bottom alignment: tile anchored at wall bottom
+		v_uv = fract((wall_bottom - pos.y) / cell_size);
+	} else {
+		// World alignment (default): tile based on world Y position
+		v_uv = fract(-pos.y / cell_size);
+	}
+
+	return vec2(h_uv, v_uv);
 }
 
 void fragment() {
@@ -185,6 +215,7 @@ void fragment() {
 	bool flip_h = false;
 	bool flip_v = false;
 	int atlas_id = 0;
+	int wall_align = 0;
 
 	// Get tile data for non-floor surfaces (floor = 5)
 	if (surface < 5) {
@@ -195,6 +226,7 @@ void fragment() {
 		flip_h = tile_info.flip_h != 0;
 		flip_v = tile_info.flip_v != 0;
 		atlas_id = tile_info.atlas_id;
+		wall_align = tile_info.wall_align;
 
 		// Check for animation and offset tile_x if animated
 		AnimInfo anim = get_animation_info(tile_x, tile_y, atlas_id, atlas_columns[atlas_id]);
@@ -205,8 +237,8 @@ void fragment() {
 		}
 	}
 
-	// Get local UV within cell
-	vec2 local_uv = get_surface_uv(local_position, surface);
+	// Get local UV within cell (wall_align and wall_bounds used for wall surfaces)
+	vec2 local_uv = get_surface_uv(local_position, surface, wall_align, wall_bounds);
 
 	// Apply rotation and flip transformations
 	local_uv = transform_uv(local_uv, rotation, flip_h, flip_v);

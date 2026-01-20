@@ -142,13 +142,14 @@ func _update_tile_data_texture() -> void:
 				var rotation := (packed & TerrainData.TILE_ROTATION_MASK) >> TerrainData.TILE_ROTATION_SHIFT
 				var flip_h := 1 if (packed & TerrainData.TILE_FLIP_H_BIT) != 0 else 0
 				var flip_v := 1 if (packed & TerrainData.TILE_FLIP_V_BIT) != 0 else 0
+				var wall_align := (packed & TerrainData.TILE_WALL_ALIGN_MASK) >> TerrainData.TILE_WALL_ALIGN_SHIFT
 
 				# Get atlas ID and actual atlas coordinates
 				var atlas_id := tile_set.get_atlas_for_tile(global_tile_index)
 				var atlas_coords := tile_set.get_tile_atlas_coords_global(global_tile_index)
 
-				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v
-				var flags := rotation | (flip_h << 2) | (flip_v << 3)
+				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v, bits 4-5 = wall_align
+				var flags := rotation | (flip_h << 2) | (flip_v << 3) | (wall_align << 4)
 
 				var pixel_x := x * 5 + surface
 				# Store as normalized values (0-255 range mapped to 0-1)

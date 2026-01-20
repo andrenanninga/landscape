@@ -19,6 +19,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Wall tile alignment modes** - Per-tile setting controlling vertical positioning on walls (World/Top/Bottom), follows sloped edges
 - [x] **Paint eyedropper** - Right-click on a painted cell to pick its tile, rotation, and flip settings
 - [x] **Random paint mode** - Toggle "Rnd" button to paint tiles with random rotation and flipping (deterministic per cell)
 - [x] **Surface lock** - Hold Shift while painting to lock to one surface type (only paints matching surfaces)
@@ -183,6 +184,14 @@
   - data_changed signal only emits once at end of batch
   - All tools (sculpt, flatten, mountain, flip diagonal) now use batching
   - Dramatic performance improvement for large brush sizes (8x8, 9x9)
+
+### 2025-01-20 - Wall Tile Alignment Modes
+- Implemented per-tile wall alignment setting:
+  - Three modes: World (seamless tiling), Top (anchored at top edge), Bottom (anchored at bottom edge)
+  - Stored in packed tile data (bits 20-21)
+  - Alignment follows sloped wall edges using per-vertex UV2 interpolation
+  - Eyedropper picks alignment mode along with other tile properties
+  - UI dropdown in paint section for selecting alignment mode
 
 ### 2025-01-20 - Paint Tool Enhancements
 - Implemented paint eyedropper:
