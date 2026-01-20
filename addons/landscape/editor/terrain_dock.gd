@@ -1,8 +1,6 @@
 @tool
 extends Control
 
-const PlaceholderTiles = preload("res://addons/landscape/resources/placeholder_tiles.gd")
-
 var terrain_editor = null:
 	set(value):
 		terrain_editor = value
@@ -27,15 +25,14 @@ var _current_mode: int = 0
 @onready var _brush_size_slider: HSlider = %BrushSizeSlider
 @onready var _brush_size_label: Label = %BrushSizeLabel
 @onready var _paint_section: VBoxContainer = %PaintSection
-@onready var _surface_selector: OptionButton = %SurfaceSelector
 @onready var _atlas_selector: OptionButton = %AtlasSelector
 @onready var _rotate_ccw_button: Button = %RotateCCWButton
 @onready var _rotate_cw_button: Button = %RotateCWButton
 @onready var _flip_h_button: Button = %FlipHButton
 @onready var _flip_v_button: Button = %FlipVButton
+@onready var _random_button: Button = %RandomButton
 @onready var _rotation_label: Label = %RotationLabel
 @onready var _tile_palette: TilePalette = %TilePalette
-@onready var _generate_placeholders_button: Button = %GeneratePlaceholdersButton
 @onready var _zoom_in_button: Button = %ZoomInButton
 @onready var _zoom_out_button: Button = %ZoomOutButton
 @onready var _spacer: Control = %Spacer
@@ -92,9 +89,6 @@ func _update_brush_size_display() -> void:
 
 
 func _setup_paint_controls() -> void:
-	if _surface_selector:
-		_surface_selector.item_selected.connect(_on_surface_selected)
-
 	if _atlas_selector:
 		_atlas_selector.item_selected.connect(_on_atlas_selected)
 
@@ -110,8 +104,8 @@ func _setup_paint_controls() -> void:
 	if _flip_v_button:
 		_flip_v_button.toggled.connect(_on_flip_v_toggled)
 
-	if _generate_placeholders_button:
-		_generate_placeholders_button.pressed.connect(_on_generate_placeholders)
+	if _random_button:
+		_random_button.toggled.connect(_on_random_toggled)
 
 	if _zoom_in_button:
 		_zoom_in_button.pressed.connect(_on_zoom_in)
@@ -139,11 +133,6 @@ func _on_paint_state_changed() -> void:
 	_update_tile_selection()
 
 
-func _on_surface_selected(index: int) -> void:
-	if terrain_editor:
-		terrain_editor.current_paint_surface = index as TerrainData.Surface
-
-
 func _on_atlas_selected(index: int) -> void:
 	if _tile_palette:
 		_tile_palette.selected_atlas = index
@@ -169,22 +158,14 @@ func _on_flip_v_toggled(pressed: bool) -> void:
 		terrain_editor.current_paint_flip_v = pressed
 
 
+func _on_random_toggled(pressed: bool) -> void:
+	if terrain_editor:
+		terrain_editor.current_paint_random = pressed
+
+
 func _on_tile_selected(tile_index: int) -> void:
 	if terrain_editor:
 		terrain_editor.current_paint_tile = tile_index
-
-
-func _on_generate_placeholders() -> void:
-	var landscape := terrain as LandscapeTerrain
-	if not landscape:
-		return
-
-	# Generate placeholder tileset
-	var tile_set := PlaceholderTiles.create_terrain_tileset()
-	landscape.tile_set = tile_set
-
-	# Update the tile palette
-	_update_tile_palette()
 
 
 func _update_paint_section_visibility() -> void:
@@ -200,14 +181,14 @@ func _update_paint_controls() -> void:
 	if not terrain_editor:
 		return
 
-	if _surface_selector:
-		_surface_selector.selected = terrain_editor.current_paint_surface
-
 	if _flip_h_button:
 		_flip_h_button.button_pressed = terrain_editor.current_paint_flip_h
 
 	if _flip_v_button:
 		_flip_v_button.button_pressed = terrain_editor.current_paint_flip_v
+
+	if _random_button:
+		_random_button.button_pressed = terrain_editor.current_paint_random
 
 	if _rotation_label:
 		var rotation_degrees: int = terrain_editor.current_paint_rotation * 90

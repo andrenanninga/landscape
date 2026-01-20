@@ -99,25 +99,6 @@ visible = false
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="SurfaceLabel" type="Label" parent="VBoxContainer/PaintSection"]
-layout_mode = 2
-text = "Surface"
-theme_type_variation = &"HeaderSmall"
-
-[node name="SurfaceSelector" type="OptionButton" parent="VBoxContainer/PaintSection"]
-unique_name_in_owner = true
-layout_mode = 2
-item_count = 5
-popup/item_0/text = "Top"
-popup/item_1/text = "North"
-popup/item_1/id = 1
-popup/item_2/text = "East"
-popup/item_2/id = 2
-popup/item_3/text = "South"
-popup/item_3/id = 3
-popup/item_4/text = "West"
-popup/item_4/id = 4
-
 [node name="TransformLabel" type="Label" parent="VBoxContainer/PaintSection"]
 layout_mode = 2
 text = "Transform"
@@ -151,6 +132,13 @@ layout_mode = 2
 toggle_mode = true
 tooltip_text = "Flip Vertical (Y)"
 text = "⇅"
+
+[node name="RandomButton" type="Button" parent="VBoxContainer/PaintSection/TransformControls"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Random mode: each tile gets random rotation and flipping"
+text = "Rnd"
 
 [node name="RotationLabel" type="Label" parent="VBoxContainer/PaintSection/TransformControls"]
 unique_name_in_owner = true
@@ -195,12 +183,6 @@ unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Zoom in"
 text = "+"
-
-[node name="GeneratePlaceholdersButton" type="Button" parent="VBoxContainer/PaintSection"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Generate Placeholder Tiles"
-tooltip_text = "Create a 4x4 placeholder tileset and assign it to the terrain"
 
 [node name="TilePalette" type="Control" parent="VBoxContainer/PaintSection"]
 unique_name_in_owner = true

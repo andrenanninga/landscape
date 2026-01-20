@@ -57,6 +57,12 @@ var current_paint_flip_v: bool = false:
 		paint_state_changed.emit()
 		_update_paint_preview()
 
+var current_paint_random: bool = false:
+	set(value):
+		current_paint_random = value
+		paint_state_changed.emit()
+		_update_paint_preview()
+
 # Brush size (1 = 1x1, 2 = 2x2, 3 = 3x3, etc.)
 var brush_size: int = 1:
 	set(value):
@@ -103,6 +109,11 @@ var _last_painted_cell: Vector2i = Vector2i(-1, -1)
 var _last_painted_surface: TerrainData.Surface = TerrainData.Surface.TOP
 var _paint_preview_buffer: Dictionary = {}  # Preview buffer: "x,z,surface" -> packed_tile_value
 var _paint_original_values: Dictionary = {}  # Original values for undo: "x,z,surface" -> packed_tile_value
+var _paint_surface_locked: bool = false  # When true, only paint on the locked surface type
+var _paint_locked_surface: TerrainData.Surface = TerrainData.Surface.TOP
+
+# Right-click picker state
+var _right_click_picking: bool = false
 
 
 func set_terrain(terrain: LandscapeTerrain) -> void:
@@ -195,14 +206,17 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 			_update_paint_drag(camera, motion.position)
 			return true
 		else:
-			_update_hover(camera, motion.position)
+			# Cancel right-click picker if mouse moves (user is moving camera)
+			if _right_click_picking:
+				_right_click_picking = false
+			_update_hover(camera, motion.position, motion.shift_pressed)
 			return false
 
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				return _start_drag(camera, mb.position)
+				return _start_drag(camera, mb.position, mb.shift_pressed)
 			else:
 				if _is_dragging:
 					_finish_drag()
@@ -223,11 +237,22 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 			elif _is_paint_dragging:
 				cancel_paint_preview()
 				return true
+			elif current_tool == Tool.PAINT:
+				if mb.pressed:
+					# Start right-click - might be picker or camera movement
+					_right_click_picking = true
+				else:
+					# Right-click released - pick tile if we didn't move
+					if _right_click_picking:
+						_right_click_picking = false
+						_pick_tile_at_hover()
+				# Don't consume - allow camera movement
+				return false
 
 	return false
 
 
-func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
+func _start_drag(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = false) -> bool:
 	if _hovered_cell.x < 0 or not _terrain:
 		return false
 
@@ -240,12 +265,17 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2) -> bool:
 		# Clear any existing preview and start fresh
 		_paint_preview_buffer.clear()
 		_paint_original_values.clear()
-		# Build preview for initial brush area
-		var previewed := _build_paint_preview(data, _hovered_cell, _hovered_surface)
+		# Lock surface when shift is held
+		if shift_pressed:
+			_paint_surface_locked = true
+			_paint_locked_surface = _hovered_surface
+		# Build preview for initial brush area (use locked surface if enabled)
+		var paint_surface := _paint_locked_surface if _paint_surface_locked else _hovered_surface
+		var previewed := _build_paint_preview(data, _hovered_cell, paint_surface)
 		if previewed:
 			_is_paint_dragging = true
 			_last_painted_cell = _hovered_cell
-			_last_painted_surface = _hovered_surface
+			_last_painted_surface = paint_surface
 			_terrain.set_tile_previews(_paint_preview_buffer)
 		return previewed
 
@@ -668,20 +698,26 @@ func _update_paint_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 	if _hovered_cell.x < 0:
 		return
 
+	# When surface is locked, only paint on matching surface type
+	var paint_surface := _paint_locked_surface if _paint_surface_locked else _hovered_surface
+	if _paint_surface_locked and _hovered_surface != _paint_locked_surface:
+		return
+
 	# Only update preview if cell or surface changed
-	if _hovered_cell == _last_painted_cell and _hovered_surface == _last_painted_surface:
+	if _hovered_cell == _last_painted_cell and paint_surface == _last_painted_surface:
 		return
 
 	# Add new cells to preview (accumulate)
-	_build_paint_preview(data, _hovered_cell, _hovered_surface)
+	_build_paint_preview(data, _hovered_cell, paint_surface)
 	_terrain.set_tile_previews(_paint_preview_buffer)
 	_last_painted_cell = _hovered_cell
-	_last_painted_surface = _hovered_surface
+	_last_painted_surface = paint_surface
 
 
 func _finish_paint_drag() -> void:
 	if not _terrain or _paint_preview_buffer.is_empty():
 		_is_paint_dragging = false
+		_paint_surface_locked = false
 		_last_painted_cell = Vector2i(-1, -1)
 		_paint_preview_buffer.clear()
 		_paint_original_values.clear()
@@ -690,6 +726,7 @@ func _finish_paint_drag() -> void:
 	var data := _terrain.terrain_data
 	if not data:
 		_is_paint_dragging = false
+		_paint_surface_locked = false
 		return
 
 	# Create undo/redo action from preview data
@@ -710,10 +747,11 @@ func _finish_paint_drag() -> void:
 	_paint_preview_buffer.clear()
 	_paint_original_values.clear()
 	_is_paint_dragging = false
+	_paint_surface_locked = false
 	_last_painted_cell = Vector2i(-1, -1)
 
 
-func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
+func _update_hover(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = false) -> void:
 	if _is_dragging:
 		return
 
@@ -728,8 +766,8 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 			_hover_mode = HoverMode.CELL
 			_hovered_surface = TerrainData.Surface.TOP
 			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
-		# Clear paint preview when not hovering terrain
-		if current_tool == Tool.PAINT and _terrain:
+		# Clear paint preview when not hovering terrain (but not during paint drag)
+		if current_tool == Tool.PAINT and _terrain and not _is_paint_dragging:
 			_terrain.clear_preview()
 		return
 
@@ -794,7 +832,20 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2) -> void:
 			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
 		# Update buffer-based paint preview (hover preview, not during drag)
 		if current_tool == Tool.PAINT and _terrain and not _is_paint_dragging:
-			_update_hover_paint_preview()
+			# Handle surface lock with shift key
+			if shift_pressed:
+				if not _paint_surface_locked:
+					# Lock to current surface when shift first pressed
+					_paint_surface_locked = true
+					_paint_locked_surface = _hovered_surface
+				if _hovered_surface == _paint_locked_surface:
+					_update_hover_paint_preview()
+				else:
+					_terrain.clear_preview()
+			else:
+				# Release lock when shift released
+				_paint_surface_locked = false
+				_update_hover_paint_preview()
 		return
 
 	# For sculpt/flatten tools, also track corner hover mode
@@ -1011,18 +1062,16 @@ func _update_hover_paint_preview() -> void:
 	# Build hover preview for entire brush area
 	var hover_preview: Dictionary = {}
 	var brush_cells := get_brush_cells(_hovered_cell, data, _brush_corner)
-	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
 
 	for cell in brush_cells:
 		var key := "%d,%d,%d" % [cell.x, cell.y, _hovered_surface]
-		hover_preview[key] = new_packed
+		hover_preview[key] = _get_paint_packed(cell, _hovered_surface)
 
 	_terrain.set_tile_previews(hover_preview)
 
 
 func _build_paint_preview(data: TerrainData, center: Vector2i, surface: TerrainData.Surface) -> bool:
 	var brush_cells := get_brush_cells(center, data, _brush_corner)
-	var new_packed := TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
 
 	var any_added := false
 	for cell in brush_cells:
@@ -1034,8 +1083,8 @@ func _build_paint_preview(data: TerrainData, center: Vector2i, surface: TerrainD
 		var old_packed := data.get_tile_packed(cell.x, cell.y, surface)
 		# Store original value for undo
 		_paint_original_values[key] = old_packed
-		# Add to preview buffer
-		_paint_preview_buffer[key] = new_packed
+		# Add to preview buffer with potentially random transform
+		_paint_preview_buffer[key] = _get_paint_packed(cell, surface)
 		any_added = true
 
 	return any_added or brush_cells.size() > 0
@@ -1047,7 +1096,44 @@ func cancel_paint_preview() -> void:
 	_paint_preview_buffer.clear()
 	_paint_original_values.clear()
 	_is_paint_dragging = false
+	_paint_surface_locked = false
 	_last_painted_cell = Vector2i(-1, -1)
+
+
+func _get_paint_packed(cell: Vector2i, surface: TerrainData.Surface) -> int:
+	if current_paint_random:
+		# Use cell position and surface as seed for deterministic randomness
+		# This ensures the same cell shows the same random transform during hover
+		var seed_value := cell.x * 73856093 ^ cell.y * 19349663 ^ surface * 83492791
+		var rng := RandomNumberGenerator.new()
+		rng.seed = seed_value
+		var rotation := rng.randi_range(0, 3) as TerrainData.Rotation
+		var flip_h := rng.randi_range(0, 1) == 1
+		var flip_v := rng.randi_range(0, 1) == 1
+		return TerrainData.pack_tile(current_paint_tile, rotation, flip_h, flip_v)
+	else:
+		return TerrainData.pack_tile(current_paint_tile, current_paint_rotation, current_paint_flip_h, current_paint_flip_v)
+
+
+func _pick_tile_at_hover() -> bool:
+	if _hovered_cell.x < 0 or not _terrain:
+		return false
+
+	var data := _terrain.terrain_data
+	if not data:
+		return false
+
+	# Get tile data from the hovered cell and surface
+	var packed := data.get_tile_packed(_hovered_cell.x, _hovered_cell.y, _hovered_surface)
+	var tile_info := TerrainData.unpack_tile(packed)
+
+	# Set current paint state to match the picked tile
+	current_paint_tile = tile_info.tile_index
+	current_paint_rotation = tile_info.rotation as TerrainData.Rotation
+	current_paint_flip_h = tile_info.flip_h
+	current_paint_flip_v = tile_info.flip_v
+
+	return true
 
 
 # Helper functions for paint tool rotation/flip
@@ -1151,6 +1237,9 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 
 	# Paint tool: show outline only (tile preview is done via shader)
 	if current_tool == Tool.PAINT:
+		# Don't show outline when surface is locked and hovering a different surface
+		if _paint_surface_locked and _hovered_surface != _paint_locked_surface:
+			return
 		for cell in brush_cells:
 			_draw_surface_outline(overlay, camera, terrain, data, cell, _hovered_surface)
 		return

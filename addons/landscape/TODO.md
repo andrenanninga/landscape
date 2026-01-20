@@ -19,6 +19,9 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Paint eyedropper** - Right-click on a painted cell to pick its tile, rotation, and flip settings
+- [x] **Random paint mode** - Toggle "Rnd" button to paint tiles with random rotation and flipping (deterministic per cell)
+- [x] **Surface lock** - Hold Shift while painting to lock to one surface type (only paints matching surfaces)
 - [x] **Animated tile support** - Tiles with animation data (frame count, columns, speed) animate automatically using TIME uniform
 - [x] **Mountain tool** - Create hills/valleys with smooth sloped edges that respect max_slope_steps
 - [x] **Flatten tool drag support** - Click and drag to flatten terrain along brush path
@@ -180,3 +183,18 @@
   - data_changed signal only emits once at end of batch
   - All tools (sculpt, flatten, mountain, flip diagonal) now use batching
   - Dramatic performance improvement for large brush sizes (8x8, 9x9)
+
+### 2025-01-20 - Paint Tool Enhancements
+- Implemented paint eyedropper:
+  - Right-click on a painted cell to pick its tile
+  - Picks tile index, rotation, and flip settings
+  - Click-only detection (moving mouse cancels pick to allow camera movement)
+- Implemented random paint mode:
+  - "Rnd" toggle button in transform controls
+  - Each cell gets deterministic random rotation (0-3) and flip (H/V)
+  - Uses cell position as seed for consistent preview
+- Implemented surface lock:
+  - Hold Shift to lock painting to one surface type
+  - First surface hovered while holding Shift becomes the locked surface
+  - Preview and outline hidden when hovering non-matching surfaces
+  - Works for both hover preview and drag painting

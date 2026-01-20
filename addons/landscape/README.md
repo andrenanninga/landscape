@@ -185,6 +185,9 @@ PBR shader with atlas-based tile texturing:
      - **Shift+Z**: Rotate counter-clockwise
      - **X**: Flip horizontal
      - **Y**: Flip vertical
+   - **Right-click** on a painted cell to pick its tile (eyedropper)
+   - **Hold Shift** while painting to lock to one surface type (e.g., only paint north walls)
+   - Enable **Random mode** (Rnd button) to paint tiles with random rotation and flipping
    - Tile preview shows exactly how the painted result will look (including on walls)
    - Status bar shows which surface is being hovered
 6. Use the **Flip** tool:
@@ -234,6 +237,9 @@ PBR shader with atlas-based tile texturing:
 - [x] Mountain tool for creating hills/valleys with smooth slopes
 - [x] Batched terrain updates for improved performance with large brushes
 - [x] Animated tile support (uses TileSet animation properties)
+- [x] Paint eyedropper (right-click to pick tile from painted cell)
+- [x] Random paint mode (randomize rotation and flipping per tile)
+- [x] Surface lock (hold Shift to paint only on one surface type)
 
 ### Not Yet Implemented
 - [ ] Floor editing tools
