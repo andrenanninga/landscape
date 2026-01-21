@@ -173,6 +173,7 @@ func _gui_input(event: InputEvent) -> void:
 
 
 # Get screen rect for a local tile index within the current atlas
+# Uses actual atlas coordinates from the tiles array
 func _get_tile_screen_rect(local_index: int) -> Rect2:
 	if not tile_set or tile_set.get_atlas_count() == 0:
 		return Rect2()
@@ -181,19 +182,20 @@ func _get_tile_screen_rect(local_index: int) -> Rect2:
 	if atlas_info.is_empty():
 		return Rect2()
 
-	var columns: int = atlas_info.columns
-	if columns == 0:
+	var tiles: Array = atlas_info.tiles
+	if local_index < 0 or local_index >= tiles.size():
 		return Rect2()
 
-	var col := local_index % columns
-	var row := local_index / columns
+	# Get actual atlas coordinates for this tile
+	var coords: Vector2i = tiles[local_index]
 	var tile_size := BASE_TILE_SIZE * zoom
 
-	var pos := Vector2(col * tile_size, row * tile_size) + pan_offset
+	var pos := Vector2(coords.x * tile_size, coords.y * tile_size) + pan_offset
 	return Rect2(pos, Vector2(tile_size, tile_size))
 
 
 # Get global tile index at screen position
+# Returns -1 if clicking on an empty grid cell
 func _get_tile_at_position(screen_pos: Vector2) -> int:
 	if not tile_set or tile_set.get_atlas_count() == 0:
 		return -1
@@ -211,16 +213,21 @@ func _get_tile_at_position(screen_pos: Vector2) -> int:
 	var col := int(local_pos.x / tile_size)
 	var row := int(local_pos.y / tile_size)
 	var columns: int = atlas_info.columns
+	var rows: int = atlas_info.rows
 
-	if col >= columns:
+	if col >= columns or row >= rows:
 		return -1
 
-	var local_index := row * columns + col
-	if local_index >= atlas_info.tile_count:
-		return -1
+	# Check if this grid position has a valid tile
+	var clicked_coords := Vector2i(col, row)
+	var tiles: Array = atlas_info.tiles
+	for i in tiles.size():
+		if tiles[i] == clicked_coords:
+			# Found a valid tile at this position
+			return atlas_info.start_index + i
 
-	# Return global tile index
-	return atlas_info.start_index + local_index
+	# No tile at this grid position
+	return -1
 
 
 func _zoom_at_point(point: Vector2, direction: float) -> void:

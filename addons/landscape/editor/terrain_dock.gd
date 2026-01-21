@@ -56,6 +56,7 @@ func _setup_tool_buttons() -> void:
 		TerrainEditor.Tool.FLIP_DIAGONAL: %FlipDiagonalButton,
 		TerrainEditor.Tool.FLATTEN: %FlattenButton,
 		TerrainEditor.Tool.MOUNTAIN: %MountainButton,
+		TerrainEditor.Tool.FENCE: %FenceButton,
 	}
 
 	for tool_type in _tool_buttons:
@@ -325,6 +326,10 @@ func _get_surface_name(surface: int) -> String:
 		2: return "East"
 		3: return "South"
 		4: return "West"
+		5: return "Fence North"
+		6: return "Fence East"
+		7: return "Fence South"
+		8: return "Fence West"
 	return "?"
 
 

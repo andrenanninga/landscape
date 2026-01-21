@@ -2,8 +2,9 @@
 class_name TerrainEditor
 extends RefCounted
 
-enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN, MOUNTAIN }
+enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN, MOUNTAIN, FENCE }
 enum HoverMode { CELL, CORNER }
+enum FenceHover { NONE, LEFT_CORNER, RIGHT_CORNER, MIDDLE }
 
 signal tool_changed(new_tool: Tool)
 signal hover_changed(cell: Vector2i, corner: int, mode: int)
@@ -121,6 +122,21 @@ var _paint_locked_surface: TerrainData.Surface = TerrainData.Surface.TOP
 # Right-click picker state
 var _right_click_picking: bool = false
 
+# Fence tool state
+var _hovered_fence_edge: int = -1  # 0=N, 1=E, 2=S, 3=W, -1=none
+var _hovered_fence_hover: FenceHover = FenceHover.NONE
+
+# Fence drag state
+var _is_fence_dragging: bool = false
+var _fence_drag_cell: Vector2i = Vector2i(-1, -1)
+var _fence_drag_edge: int = -1
+var _fence_drag_corner: int = -1  # 0=left, 1=right, -1=both (middle)
+var _fence_original_heights: Array[int] = [0, 0]  # [left, right]
+var _fence_neighbor_original_heights: Array[int] = [0, 0]  # Neighbor fence that may be cleared
+var _fence_drag_start_mouse_y: float = 0.0
+var _fence_drag_world_pos: Vector3 = Vector3.ZERO
+var _fence_current_delta: int = 0
+
 
 func set_terrain(terrain: LandscapeTerrain) -> void:
 	_terrain = terrain
@@ -211,6 +227,9 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 		elif _is_paint_dragging:
 			_update_paint_drag(camera, motion.position)
 			return true
+		elif _is_fence_dragging:
+			_update_fence_drag(camera, motion.position)
+			return true
 		else:
 			# Cancel right-click picker if mouse moves (user is moving camera)
 			if _right_click_picking:
@@ -233,6 +252,9 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 				elif _is_paint_dragging:
 					_finish_paint_drag()
 					return true
+				elif _is_fence_dragging:
+					_finish_fence_drag()
+					return true
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			if _is_dragging:
 				_cancel_drag()
@@ -242,6 +264,9 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 				return true
 			elif _is_paint_dragging:
 				cancel_paint_preview()
+				return true
+			elif _is_fence_dragging:
+				_cancel_fence_drag()
 				return true
 			elif current_tool == Tool.PAINT:
 				if mb.pressed:
@@ -306,6 +331,18 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = fal
 		# Apply to initial brush area
 		_apply_flatten_to_brush(data, _hovered_cell)
 		return true
+
+	# Handle fence tool
+	if current_tool == Tool.FENCE:
+		if _hovered_fence_edge < 0:
+			return false
+
+		# Shift+click = delete fence
+		if shift_pressed:
+			_delete_fence(data, _hovered_cell, _hovered_fence_edge)
+			return true
+
+		return _start_fence_drag(camera, mouse_pos, data)
 
 	if current_tool != Tool.SCULPT and current_tool != Tool.MOUNTAIN:
 		return false
@@ -744,8 +781,15 @@ func _finish_paint_drag() -> void:
 		var surface := int(parts[2]) as TerrainData.Surface
 		var new_packed: int = _paint_preview_buffer[key]
 		var old_packed: int = _paint_original_values[key]
-		undo_redo.add_do_method(data, "set_tile_packed", x, z, surface, new_packed)
-		undo_redo.add_undo_method(data, "set_tile_packed", x, z, surface, old_packed)
+
+		# Handle fence surfaces differently
+		if surface >= TerrainData.Surface.FENCE_NORTH:
+			var edge := surface - TerrainData.Surface.FENCE_NORTH
+			undo_redo.add_do_method(data, "set_fence_tile_packed", x, z, edge, new_packed)
+			undo_redo.add_undo_method(data, "set_fence_tile_packed", x, z, edge, old_packed)
+		else:
+			undo_redo.add_do_method(data, "set_tile_packed", x, z, surface, new_packed)
+			undo_redo.add_undo_method(data, "set_tile_packed", x, z, surface, old_packed)
 	undo_redo.commit_action()
 
 	# Clear preview
@@ -787,19 +831,49 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = f
 
 	_hovered_surface = _surface_from_normal(hit_normal)
 
-	# For walls, adjust the cell based on which cell owns the wall
+	# For walls/fences, adjust the cell based on which cell owns the surface
 	# The hit position might be on the boundary, so we offset slightly into the correct cell
 	var adjusted_pos := hit_pos
-	if _hovered_surface == TerrainData.Surface.SOUTH:
+	if _hovered_surface == TerrainData.Surface.SOUTH or _hovered_surface == TerrainData.Surface.FENCE_SOUTH:
 		adjusted_pos.z -= 0.01
-	elif _hovered_surface == TerrainData.Surface.EAST:
+	elif _hovered_surface == TerrainData.Surface.EAST or _hovered_surface == TerrainData.Surface.FENCE_EAST:
 		adjusted_pos.x -= 0.01
-	elif _hovered_surface == TerrainData.Surface.NORTH:
+	elif _hovered_surface == TerrainData.Surface.NORTH or _hovered_surface == TerrainData.Surface.FENCE_NORTH:
 		adjusted_pos.z += 0.01
-	elif _hovered_surface == TerrainData.Surface.WEST:
+	elif _hovered_surface == TerrainData.Surface.WEST or _hovered_surface == TerrainData.Surface.FENCE_WEST:
 		adjusted_pos.x += 0.01
 
 	_hovered_cell = _terrain.world_to_cell(adjusted_pos)
+
+	# Check if we hit a fence surface instead of a wall
+	# Fences extend upward from terrain top, walls extend downward
+	if _hovered_surface >= TerrainData.Surface.NORTH and _hovered_surface <= TerrainData.Surface.WEST:
+		var local_hit := _terrain.to_local(hit_pos)
+		var data := _terrain.terrain_data
+		var edge := _hovered_surface - 1  # NORTH=1 -> edge 0, etc.
+		if data.has_fence(_hovered_cell.x, _hovered_cell.y, edge):
+			# Get terrain top height at this edge
+			var top_corners := data.get_top_corners(_hovered_cell.x, _hovered_cell.y)
+			var left_corner: int
+			var right_corner: int
+			match edge:
+				0:  # NORTH
+					left_corner = TerrainData.Corner.NW
+					right_corner = TerrainData.Corner.NE
+				1:  # EAST
+					left_corner = TerrainData.Corner.NE
+					right_corner = TerrainData.Corner.SE
+				2:  # SOUTH
+					left_corner = TerrainData.Corner.SE
+					right_corner = TerrainData.Corner.SW
+				3:  # WEST
+					left_corner = TerrainData.Corner.SW
+					right_corner = TerrainData.Corner.NW
+
+			var top_height := (data.steps_to_world(top_corners[left_corner]) + data.steps_to_world(top_corners[right_corner])) / 2.0
+			# If hit is above the terrain top, it's a fence
+			if local_hit.y > top_height - 0.01:
+				_hovered_surface = [TerrainData.Surface.FENCE_NORTH, TerrainData.Surface.FENCE_EAST, TerrainData.Surface.FENCE_SOUTH, TerrainData.Surface.FENCE_WEST][edge]
 
 	# Calculate position within cell to determine nearest corner (for all tools)
 	var local_pos := _terrain.to_local(hit_pos)
@@ -829,6 +903,15 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = f
 
 	# Store brush corner for even brush size centering
 	_brush_corner = closest_corner
+
+	# For fence tool, we track edge hover mode instead of corner
+	if current_tool == Tool.FENCE:
+		_hovered_corner = -1
+		_hover_mode = HoverMode.CELL
+		_update_fence_hover(local_pos, cell_size)
+		if old_cell != _hovered_cell:
+			hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
+		return
 
 	# For paint, flip diagonal, and mountain tools, we don't need corner hover mode
 	if current_tool == Tool.PAINT or current_tool == Tool.FLIP_DIAGONAL or current_tool == Tool.MOUNTAIN:
@@ -1086,7 +1169,17 @@ func _build_paint_preview(data: TerrainData, center: Vector2i, surface: TerrainD
 		if _paint_preview_buffer.has(key):
 			continue
 
-		var old_packed := data.get_tile_packed(cell.x, cell.y, surface)
+		# Handle fence surfaces differently
+		var old_packed: int
+		if surface >= TerrainData.Surface.FENCE_NORTH:
+			var edge := surface - TerrainData.Surface.FENCE_NORTH
+			# Skip if no fence exists at this edge
+			if not data.has_fence(cell.x, cell.y, edge):
+				continue
+			old_packed = data.get_fence_tile_packed(cell.x, cell.y, edge)
+		else:
+			old_packed = data.get_tile_packed(cell.x, cell.y, surface)
+
 		# Store original value for undo
 		_paint_original_values[key] = old_packed
 		# Add to preview buffer with potentially random transform
@@ -1130,7 +1223,13 @@ func _pick_tile_at_hover() -> bool:
 		return false
 
 	# Get tile data from the hovered cell and surface
-	var packed := data.get_tile_packed(_hovered_cell.x, _hovered_cell.y, _hovered_surface)
+	var packed: int
+	if _hovered_surface >= TerrainData.Surface.FENCE_NORTH:
+		var edge := _hovered_surface - TerrainData.Surface.FENCE_NORTH
+		packed = data.get_fence_tile_packed(_hovered_cell.x, _hovered_cell.y, edge)
+	else:
+		packed = data.get_tile_packed(_hovered_cell.x, _hovered_cell.y, _hovered_surface)
+
 	var tile_info := TerrainData.unpack_tile(packed)
 
 	# Set current paint state to match the picked tile
@@ -1289,6 +1388,11 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 			# Just show core brush area when hovering
 			for cell in brush_cells:
 				_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, core_color)
+		return
+
+	# Fence tool: show fence edge highlight
+	if current_tool == Tool.FENCE:
+		_draw_fence_overlay(overlay, camera, terrain, data)
 		return
 
 	# Sculpt tool: draw cell/corner highlight
@@ -1528,3 +1632,354 @@ func _draw_corner_highlight(overlay: Control, camera: Camera3D, terrain: Landsca
 
 	# Draw corner circle
 	overlay.draw_circle(screen_points[0], 6.0, color)
+
+
+# ============================================================================
+# FENCE TOOL METHODS
+# ============================================================================
+
+const FENCE_EDGE_THRESHOLD := 0.25  # Distance from edge center to detect fence edge hover
+
+
+func _start_fence_drag(camera: Camera3D, mouse_pos: Vector2, data: TerrainData) -> bool:
+	if _hovered_cell.x < 0 or _hovered_fence_edge < 0:
+		return false
+
+	_is_fence_dragging = true
+	_fence_drag_cell = _hovered_cell
+	_fence_drag_edge = _hovered_fence_edge
+	_fence_current_delta = 0
+	_fence_drag_start_mouse_y = mouse_pos.y
+
+	# Determine which corner(s) we're dragging
+	match _hovered_fence_hover:
+		FenceHover.LEFT_CORNER:
+			_fence_drag_corner = 0
+		FenceHover.RIGHT_CORNER:
+			_fence_drag_corner = 1
+		_:  # MIDDLE or NONE
+			_fence_drag_corner = -1  # Both corners
+
+	# Store original heights (before any modification, for undo)
+	_fence_original_heights = data.get_fence_heights(_fence_drag_cell.x, _fence_drag_cell.y, _fence_drag_edge)
+
+	# Store neighbor's fence heights (in case we clear it)
+	var neighbor := _get_fence_neighbor_cell(_fence_drag_cell, _fence_drag_edge)
+	var neighbor_edge := _get_opposite_edge(_fence_drag_edge)
+	if data.is_valid_cell(neighbor.x, neighbor.y):
+		_fence_neighbor_original_heights = data.get_fence_heights(neighbor.x, neighbor.y, neighbor_edge)
+	else:
+		_fence_neighbor_original_heights = [0, 0]
+
+	# If no fence exists, create one with default height of 1 step
+	# Note: _fence_original_heights stays [0, 0] for proper undo
+	if _fence_original_heights[0] == 0 and _fence_original_heights[1] == 0:
+		data.set_fence_heights(_fence_drag_cell.x, _fence_drag_cell.y, _fence_drag_edge, 1, 1)
+
+	# Calculate world position for drag scaling
+	var cell_size := data.cell_size
+	var top_corners := data.get_top_world_corners(_fence_drag_cell.x, _fence_drag_cell.y)
+
+	# Get edge midpoint for world position reference
+	var edge_start: Vector3
+	var edge_end: Vector3
+	match _fence_drag_edge:
+		0:  # NORTH
+			edge_start = top_corners[0]  # NW
+			edge_end = top_corners[1]    # NE
+		1:  # EAST
+			edge_start = top_corners[1]  # NE
+			edge_end = top_corners[2]    # SE
+		2:  # SOUTH
+			edge_start = top_corners[2]  # SE
+			edge_end = top_corners[3]    # SW
+		3:  # WEST
+			edge_start = top_corners[3]  # SW
+			edge_end = top_corners[0]    # NW
+
+	var edge_mid := (edge_start + edge_end) / 2.0
+	# Use current fence heights (not original) for drag reference position
+	var current_heights := data.get_fence_heights(_fence_drag_cell.x, _fence_drag_cell.y, _fence_drag_edge)
+	edge_mid.y += data.steps_to_world((current_heights[0] + current_heights[1]) / 2)
+	_fence_drag_world_pos = _terrain.to_global(edge_mid)
+
+	return true
+
+
+func _update_fence_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
+	if not _is_fence_dragging or not _terrain:
+		return
+
+	var data := _terrain.terrain_data
+	if not data:
+		return
+
+	# Calculate screen-space scale
+	var point_above := _fence_drag_world_pos + Vector3(0, 1, 0)
+	var screen_drag_pos := camera.unproject_position(_fence_drag_world_pos)
+	var screen_above := camera.unproject_position(point_above)
+	var pixels_per_unit := screen_drag_pos.y - screen_above.y
+
+	if abs(pixels_per_unit) < 0.001:
+		return
+
+	# Calculate mouse delta in world units
+	var mouse_delta_pixels := _fence_drag_start_mouse_y - mouse_pos.y
+	var mouse_delta_world := mouse_delta_pixels / pixels_per_unit
+
+	# Convert to height steps
+	var height_step := data.height_step
+	var new_delta := int(round(mouse_delta_world / height_step))
+
+	if new_delta == _fence_current_delta:
+		return
+
+	_fence_current_delta = new_delta
+
+	# Apply the new heights
+	var new_left := _fence_original_heights[0]
+	var new_right := _fence_original_heights[1]
+
+	if _fence_drag_corner == 0:  # Left corner only
+		new_left = maxi(0, _fence_original_heights[0] + _fence_current_delta)
+	elif _fence_drag_corner == 1:  # Right corner only
+		new_right = maxi(0, _fence_original_heights[1] + _fence_current_delta)
+	else:  # Both corners
+		new_left = maxi(0, _fence_original_heights[0] + _fence_current_delta)
+		new_right = maxi(0, _fence_original_heights[1] + _fence_current_delta)
+
+	data.set_fence_heights(_fence_drag_cell.x, _fence_drag_cell.y, _fence_drag_edge, new_left, new_right)
+
+
+func _finish_fence_drag() -> void:
+	if not _is_fence_dragging or not _terrain:
+		_is_fence_dragging = false
+		return
+
+	var data := _terrain.terrain_data
+	if not data:
+		_is_fence_dragging = false
+		return
+
+	var final_heights := data.get_fence_heights(_fence_drag_cell.x, _fence_drag_cell.y, _fence_drag_edge)
+
+	# Only create undo action if there was a change
+	if final_heights[0] != _fence_original_heights[0] or final_heights[1] != _fence_original_heights[1]:
+		undo_redo.create_action("Modify Fence")
+		undo_redo.add_do_method(data, "set_fence_heights", _fence_drag_cell.x, _fence_drag_cell.y, _fence_drag_edge, final_heights[0], final_heights[1])
+		undo_redo.add_undo_method(data, "set_fence_heights", _fence_drag_cell.x, _fence_drag_cell.y, _fence_drag_edge, _fence_original_heights[0], _fence_original_heights[1])
+
+		# If we had a neighbor fence that was cleared, restore it on undo
+		if _fence_neighbor_original_heights[0] > 0 or _fence_neighbor_original_heights[1] > 0:
+			var neighbor := _get_fence_neighbor_cell(_fence_drag_cell, _fence_drag_edge)
+			var neighbor_edge := _get_opposite_edge(_fence_drag_edge)
+			undo_redo.add_undo_method(data, "set_fence_heights", neighbor.x, neighbor.y, neighbor_edge, _fence_neighbor_original_heights[0], _fence_neighbor_original_heights[1])
+
+		undo_redo.commit_action(false)  # Don't execute, already applied
+
+	_is_fence_dragging = false
+
+
+func _cancel_fence_drag() -> void:
+	if not _is_fence_dragging or not _terrain:
+		_is_fence_dragging = false
+		return
+
+	var data := _terrain.terrain_data
+	if data:
+		# Restore original heights (this may clear our fence if original was 0)
+		data.set_fence_heights(_fence_drag_cell.x, _fence_drag_cell.y, _fence_drag_edge, _fence_original_heights[0], _fence_original_heights[1])
+
+		# Restore neighbor fence if it was cleared
+		if _fence_neighbor_original_heights[0] > 0 or _fence_neighbor_original_heights[1] > 0:
+			var neighbor := _get_fence_neighbor_cell(_fence_drag_cell, _fence_drag_edge)
+			var neighbor_edge := _get_opposite_edge(_fence_drag_edge)
+			data.set_fence_heights(neighbor.x, neighbor.y, neighbor_edge, _fence_neighbor_original_heights[0], _fence_neighbor_original_heights[1])
+
+	_is_fence_dragging = false
+
+
+func _delete_fence(data: TerrainData, cell: Vector2i, edge: int) -> void:
+	var old_heights := data.get_fence_heights(cell.x, cell.y, edge)
+	if old_heights[0] == 0 and old_heights[1] == 0:
+		return  # No fence to delete
+
+	undo_redo.create_action("Delete Fence")
+	undo_redo.add_do_method(data, "clear_fence", cell.x, cell.y, edge)
+	undo_redo.add_undo_method(data, "set_fence_heights", cell.x, cell.y, edge, old_heights[0], old_heights[1])
+	undo_redo.commit_action()
+
+
+func _update_fence_hover(local_pos: Vector3, cell_size: float) -> void:
+	# Reset fence hover state
+	_hovered_fence_edge = -1
+	_hovered_fence_hover = FenceHover.NONE
+
+	if _hovered_cell.x < 0 or not _terrain:
+		return
+
+	var data := _terrain.terrain_data
+	if not data:
+		return
+
+	# Calculate position within cell (0-1 range)
+	var cell_local_x := local_pos.x - _hovered_cell.x * cell_size
+	var cell_local_z := local_pos.z - _hovered_cell.y * cell_size
+	var norm_x := cell_local_x / cell_size
+	var norm_z := cell_local_z / cell_size
+
+	# Check distance to each edge
+	var dist_to_north := norm_z
+	var dist_to_south := 1.0 - norm_z
+	var dist_to_west := norm_x
+	var dist_to_east := 1.0 - norm_x
+
+	# Find closest edge
+	var min_dist := dist_to_north
+	var closest_edge := 0  # NORTH
+	if dist_to_east < min_dist:
+		min_dist = dist_to_east
+		closest_edge = 1  # EAST
+	if dist_to_south < min_dist:
+		min_dist = dist_to_south
+		closest_edge = 2  # SOUTH
+	if dist_to_west < min_dist:
+		min_dist = dist_to_west
+		closest_edge = 3  # WEST
+
+	# Only consider it a fence hover if close enough to edge
+	if min_dist > FENCE_EDGE_THRESHOLD:
+		return
+
+	# Check if this cell has a fence on this edge
+	var has_fence_here := data.has_fence(_hovered_cell.x, _hovered_cell.y, closest_edge)
+
+	# Check if the neighbor has a fence on the shared edge
+	var neighbor := _get_fence_neighbor_cell(_hovered_cell, closest_edge)
+	var neighbor_edge := _get_opposite_edge(closest_edge)
+	var has_fence_neighbor := data.is_valid_cell(neighbor.x, neighbor.y) and data.has_fence(neighbor.x, neighbor.y, neighbor_edge)
+
+	# If neighbor has fence but we don't, redirect to neighbor's fence
+	if has_fence_neighbor and not has_fence_here:
+		_hovered_cell = neighbor
+		closest_edge = neighbor_edge
+		# Recalculate normalized position relative to the new cell
+		cell_local_x = local_pos.x - _hovered_cell.x * cell_size
+		cell_local_z = local_pos.z - _hovered_cell.y * cell_size
+		norm_x = cell_local_x / cell_size
+		norm_z = cell_local_z / cell_size
+
+	_hovered_fence_edge = closest_edge
+
+	# Determine if we're near a corner or in the middle of the edge
+	var edge_pos: float  # 0-1 position along the edge (0 = left corner, 1 = right corner)
+	match closest_edge:
+		0:  # NORTH: left = NW (x=0), right = NE (x=1)
+			edge_pos = norm_x
+		1:  # EAST: left = NE (z=0), right = SE (z=1)
+			edge_pos = norm_z
+		2:  # SOUTH: left = SE (x=1), right = SW (x=0)
+			edge_pos = 1.0 - norm_x
+		3:  # WEST: left = SW (z=1), right = NW (z=0)
+			edge_pos = 1.0 - norm_z
+
+	# Corner threshold (closer than this to 0 or 1 = corner)
+	const CORNER_THRESHOLD := 0.3
+	if edge_pos < CORNER_THRESHOLD:
+		_hovered_fence_hover = FenceHover.LEFT_CORNER
+	elif edge_pos > 1.0 - CORNER_THRESHOLD:
+		_hovered_fence_hover = FenceHover.RIGHT_CORNER
+	else:
+		_hovered_fence_hover = FenceHover.MIDDLE
+
+
+func _draw_fence_overlay(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData) -> void:
+	var cell := _fence_drag_cell if _is_fence_dragging else _hovered_cell
+	var edge := _fence_drag_edge if _is_fence_dragging else _hovered_fence_edge
+
+	if cell.x < 0 or edge < 0:
+		return
+
+	var color := Color.CYAN if not _is_fence_dragging else Color.GREEN
+
+	# Get fence surface
+	var fence_surface: TerrainData.Surface
+	match edge:
+		0: fence_surface = TerrainData.Surface.FENCE_NORTH
+		1: fence_surface = TerrainData.Surface.FENCE_EAST
+		2: fence_surface = TerrainData.Surface.FENCE_SOUTH
+		3: fence_surface = TerrainData.Surface.FENCE_WEST
+
+	# Check if fence exists
+	var has_fence := data.has_fence(cell.x, cell.y, edge)
+
+	if has_fence:
+		# Draw the fence surface highlight
+		_draw_surface_highlight(overlay, camera, terrain, data, cell, fence_surface, color)
+
+		# If hovering a corner, highlight that corner
+		if not _is_fence_dragging and _hovered_fence_hover != FenceHover.MIDDLE and _hovered_fence_hover != FenceHover.NONE:
+			var fence_corners := data.get_fence_world_corners(cell.x, cell.y, fence_surface)
+			var corner_idx: int
+			if _hovered_fence_hover == FenceHover.LEFT_CORNER:
+				corner_idx = 0  # top-left
+			else:
+				corner_idx = 1  # top-right
+
+			var corner_world := terrain.to_global(fence_corners[corner_idx])
+			if not camera.is_position_behind(corner_world):
+				var corner_screen := camera.unproject_position(corner_world)
+				overlay.draw_circle(corner_screen, 8.0, Color.WHITE)
+				overlay.draw_circle(corner_screen, 6.0, color)
+	else:
+		# No fence - draw edge highlight to show where fence will be created
+		var top_corners := data.get_top_world_corners(cell.x, cell.y)
+		var edge_start: Vector3
+		var edge_end: Vector3
+		match edge:
+			0:  # NORTH
+				edge_start = top_corners[0]  # NW
+				edge_end = top_corners[1]    # NE
+			1:  # EAST
+				edge_start = top_corners[1]  # NE
+				edge_end = top_corners[2]    # SE
+			2:  # SOUTH
+				edge_start = top_corners[2]  # SE
+				edge_end = top_corners[3]    # SW
+			3:  # WEST
+				edge_start = top_corners[3]  # SW
+				edge_end = top_corners[0]    # NW
+
+		var world_start := terrain.to_global(edge_start)
+		var world_end := terrain.to_global(edge_end)
+
+		if camera.is_position_behind(world_start) or camera.is_position_behind(world_end):
+			return
+
+		var screen_start := camera.unproject_position(world_start)
+		var screen_end := camera.unproject_position(world_end)
+
+		# Draw edge line with preview of fence height
+		overlay.draw_line(screen_start, screen_end, color, 4.0)
+
+		# Draw small circles at edge endpoints
+		overlay.draw_circle(screen_start, 5.0, color)
+		overlay.draw_circle(screen_end, 5.0, color)
+
+
+func _get_fence_neighbor_cell(cell: Vector2i, edge: int) -> Vector2i:
+	match edge:
+		0: return Vector2i(cell.x, cell.y - 1)  # NORTH
+		1: return Vector2i(cell.x + 1, cell.y)  # EAST
+		2: return Vector2i(cell.x, cell.y + 1)  # SOUTH
+		3: return Vector2i(cell.x - 1, cell.y)  # WEST
+	return cell
+
+
+func _get_opposite_edge(edge: int) -> int:
+	match edge:
+		0: return 2  # NORTH -> SOUTH
+		1: return 3  # EAST -> WEST
+		2: return 0  # SOUTH -> NORTH
+		3: return 1  # WEST -> EAST
+	return edge

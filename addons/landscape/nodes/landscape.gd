@@ -116,12 +116,12 @@ func _update_tile_data_texture() -> void:
 		_tile_data_texture = null
 		return
 
-	# Create RGBA8 image: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
+	# Create RGBA8 image: width = grid_width * 9 (5 surfaces + 4 fence surfaces per cell), height = grid_depth
 	# R channel = atlas tile X coordinate (0-255)
 	# G channel = atlas tile Y coordinate (0-255)
 	# B channel = flags (bits 0-1: rotation, bit 2: flip_h, bit 3: flip_v)
 	# A channel = atlas_id (0-255)
-	var width := terrain_data.grid_width * 5
+	var width := terrain_data.grid_width * 9
 	var height := terrain_data.grid_depth
 
 	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
@@ -129,6 +129,7 @@ func _update_tile_data_texture() -> void:
 	for z in terrain_data.grid_depth:
 		for x in terrain_data.grid_width:
 			var tiles := terrain_data.get_all_tiles_packed(x, z)
+			# Process 5 regular surfaces (top, north, east, south, west)
 			for surface in 5:
 				# Check if preview buffer has an override for this cell/surface
 				var key := "%d,%d,%d" % [x, z, surface]
@@ -151,7 +152,35 @@ func _update_tile_data_texture() -> void:
 				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v, bits 4-5 = wall_align
 				var flags := rotation | (flip_h << 2) | (flip_v << 3) | (wall_align << 4)
 
-				var pixel_x := x * 5 + surface
+				var pixel_x := x * 9 + surface
+				# Store as normalized values (0-255 range mapped to 0-1)
+				image.set_pixel(pixel_x, z, Color(atlas_coords.x / 255.0, atlas_coords.y / 255.0, flags / 255.0, atlas_id / 255.0))
+
+			# Process 4 fence surfaces (fence_north, fence_east, fence_south, fence_west)
+			var fence_tiles := terrain_data.get_all_fence_tiles_packed(x, z)
+			for edge in 4:
+				var fence_surface := 5 + edge  # 5=fence_north, 6=fence_east, 7=fence_south, 8=fence_west
+				var key := "%d,%d,%d" % [x, z, fence_surface + 1]  # Surface enum: FENCE_NORTH=5, etc.
+				var packed: int
+				if _preview_buffer.has(key):
+					packed = _preview_buffer[key]
+				else:
+					packed = fence_tiles[edge]
+
+				var global_tile_index := packed & TerrainData.TILE_INDEX_MASK
+				var rotation := (packed & TerrainData.TILE_ROTATION_MASK) >> TerrainData.TILE_ROTATION_SHIFT
+				var flip_h := 1 if (packed & TerrainData.TILE_FLIP_H_BIT) != 0 else 0
+				var flip_v := 1 if (packed & TerrainData.TILE_FLIP_V_BIT) != 0 else 0
+				var wall_align := (packed & TerrainData.TILE_WALL_ALIGN_MASK) >> TerrainData.TILE_WALL_ALIGN_SHIFT
+
+				# Get atlas ID and actual atlas coordinates
+				var atlas_id := tile_set.get_atlas_for_tile(global_tile_index)
+				var atlas_coords := tile_set.get_tile_atlas_coords_global(global_tile_index)
+
+				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v, bits 4-5 = wall_align
+				var flags := rotation | (flip_h << 2) | (flip_v << 3) | (wall_align << 4)
+
+				var pixel_x := x * 9 + fence_surface
 				# Store as normalized values (0-255 range mapped to 0-1)
 				image.set_pixel(pixel_x, z, Color(atlas_coords.x / 255.0, atlas_coords.y / 255.0, flags / 255.0, atlas_id / 255.0))
 

@@ -16,6 +16,7 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Flip diagonal tool** - toggle triangle diagonal direction for saddle-shaped terrain
 - **Flatten tool** - drag to flatten terrain to a target height
 - **Mountain tool** - create hills and valleys with smooth sloped edges
+- **Fence tool** - create vertical fences that extend upward from tile edges with independent corner heights
 - **Adjustable brush size** - 1x1 to 9x9 brush for all terrain tools
 - **Batched updates** - efficient mesh rebuilding for large brush operations
 - **Visual feedback** - overlay-based selection highlight and sidebar status display
@@ -24,22 +25,27 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 
 ### Data Model
 
-Each cell stores **8 corner heights** (4 for top, 4 for floor) plus **5 surface tiles**:
+Each cell stores **8 corner heights** (4 for top, 4 for floor) plus **9 surface tiles** (5 walls + 4 fences):
 - Corners: NW, NE, SE, SW (clockwise from top-left when viewed from above)
 - Heights stored as integer steps, converted to world units via `height_step` multiplier
 - Floor must always be at or below top
 - Surfaces: TOP, NORTH, EAST, SOUTH, WEST - each with tile index, rotation (0-3), flip_h, flip_v
+- Fences: Per-edge heights and tiles for FENCE_NORTH, FENCE_EAST, FENCE_SOUTH, FENCE_WEST
 
 ```
 Cell[x,z]:
   top_corners   = [NW, NE, SE, SW]   # Top surface heights
   floor_corners = [NW, NE, SE, SW]   # Floor surface heights
-  surfaces[5]:                        # Per-surface tile data
+  surfaces[5]:                        # Per-surface tile data (TOP, N, E, S, W)
     tile_index  = int (0-65535)      # Index into tile atlas
     rotation    = int (0-3)          # 0°, 90°, 180°, 270° clockwise
     flip_h      = bool               # Horizontal flip
     flip_v      = bool               # Vertical flip
     wall_align  = int (0-2)          # Wall alignment: 0=World, 1=Top, 2=Bottom
+  fence_heights[4]:                   # Per-edge fence heights (N, E, S, W)
+    left_height  = int (0-65535)     # Left corner height in steps
+    right_height = int (0-65535)     # Right corner height in steps
+  fence_tiles[4]:                     # Per-edge fence tile data (same format as surfaces)
 ```
 
 ### Mesh Generation
@@ -55,6 +61,15 @@ For each cell edge:
 1. Check if neighbor exists at that edge
 2. If neighbor exists: generate wall from our top down to `max(our_floor, neighbor_top)`
 3. If no neighbor (outer edge): generate wall from top to floor
+
+### Fence Generation Logic
+
+- Fences extend **upward** from tile edges (unlike walls which extend downward)
+- Each fence has 2 independent top corner heights that can be manipulated separately
+- Fence base uses the **maximum** height of both neighboring cells at each corner
+- Double-sided geometry (visible from both sides)
+- Each physical edge can only have one fence (creating a fence clears any conflicting neighbor fence)
+- Fences are editable from either side of the edge
 
 ## File Structure
 
@@ -129,7 +144,7 @@ Generates ArrayMesh from TerrainData using SurfaceTool:
 
 ### TerrainEditor (RefCounted)
 Editor tool coordination:
-- Tools: SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN, MOUNTAIN
+- Tools: SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN, MOUNTAIN, FENCE
 - **Brush size**: Adjustable 1x1 to 9x9 (including even sizes), affects all tools
 - **Drag-based sculpting**: Click and drag to raise/lower terrain
 - **Smart corner detection**: Automatically switches between cell mode (center) and corner mode (near corners)
@@ -209,11 +224,19 @@ PBR shader with atlas-based tile texturing:
    - Creates smooth sloped edges instead of sheer cliffs
    - Slopes respect the terrain's max_slope_steps setting
    - Ideal for creating natural-looking terrain features
-9. Adjust **Brush Size**:
+9. Use the **Fence** tool:
+   - Click on a tile **edge** to create a fence (default height: 1 step)
+   - Drag fence **corners** to adjust that corner's height independently
+   - Drag fence **middle** (between corners) to adjust both corners together
+   - **Shift+click** to delete a fence
+   - Fences extend upward from the edge, anchored at the highest neighboring cell
+   - Fences can be edited from either side of the edge
+   - Paint fences using the Paint tool (same as walls: rotation, flip, wall alignment)
+10. Adjust **Brush Size**:
    - Use the slider below the tool buttons (1-9)
    - Affects all terrain tools (Sculpt, Paint, Flip, Flatten, Mountain)
    - Larger brushes edit multiple cells at once
-10. View cell info in the sidebar dock (updates on hover and drag)
+11. View cell info in the sidebar dock (updates on hover and drag)
 
 ## Current Status
 
@@ -246,6 +269,7 @@ PBR shader with atlas-based tile texturing:
 - [x] Random paint mode (randomize rotation and flipping per tile)
 - [x] Surface lock (hold Shift to paint only on one surface type)
 - [x] Wall tile alignment modes (World/Top/Bottom) for controlling vertical tile positioning on walls
+- [x] Fence tool - create vertical fences extending upward from tile edges with independent corner heights
 
 ### Not Yet Implemented
 - [ ] Floor editing tools

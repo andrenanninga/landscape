@@ -69,6 +69,13 @@ toggle_mode = true
 text = "Mountain"
 tooltip_text = "Drag to create hills and valleys with smooth slopes. Raises/lowers center with sloped edges."
 
+[node name="FenceButton" type="Button" parent="VBoxContainer/TerrainTools"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+text = "Fence"
+tooltip_text = "Click on edge to create fence. Drag to adjust height. Drag corners independently. Shift+click to delete."
+
 [node name="BrushSection" type="HBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
 

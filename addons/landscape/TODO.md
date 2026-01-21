@@ -19,6 +19,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Fence tool** - Create vertical fences extending upward from tile edges with independent corner heights, double-sided geometry, editable from either side
 - [x] **Wall tile alignment modes** - Per-tile setting controlling vertical positioning on walls (World/Top/Bottom), follows sloped edges
 - [x] **Paint eyedropper** - Right-click on a painted cell to pick its tile, rotation, and flip settings
 - [x] **Random paint mode** - Toggle "Rnd" button to paint tiles with random rotation and flipping (deterministic per cell)
@@ -207,3 +208,30 @@
   - First surface hovered while holding Shift becomes the locked surface
   - Preview and outline hidden when hovering non-matching surfaces
   - Works for both hover preview and drag painting
+
+### 2025-01-21 - Fence Tool
+- Implemented complete fence feature:
+  - New FENCE tool in terrain editor
+  - Fences extend **upward** from tile edges (unlike walls which go downward)
+  - Each fence has 2 independent corner heights (left and right)
+  - Click on edge to create fence with default height (1 step)
+  - Drag corners to adjust height independently, drag middle for both together
+  - Shift+click to delete fence
+  - Double-sided geometry (visible from both sides)
+- Data structure changes:
+  - Extended CELL_DATA_SIZE from 13 to 21 integers per cell
+  - Added fence height packing (bits 0-15 left, bits 16-31 right)
+  - Added fence tile data (same format as wall tiles)
+  - Surface enum extended with FENCE_NORTH, FENCE_EAST, FENCE_SOUTH, FENCE_WEST
+- Mesh generation:
+  - New _add_fences() and _add_fence_quad() methods
+  - Surface color encoding expanded from 5 to 9 types
+  - Fence base uses MAX height of both neighboring cells
+- Shader updates:
+  - Handle 10 surface types (0-9 instead of 0-5)
+  - Fence surfaces mapped to tile data indices 5-8
+- Editor improvements:
+  - Fences editable from either side of the edge
+  - Each physical edge can only have one fence (auto-clears conflicting neighbor fence)
+  - Paint tool extended to support fence surfaces
+  - Full undo/redo support for fence create, modify, and delete

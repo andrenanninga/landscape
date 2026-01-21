@@ -44,9 +44,10 @@ varying vec2 wall_bounds;  // UV2: x = wall top Y, y = wall bottom Y (for wall a
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	local_position = VERTEX;
-	// Decode surface type from vertex color (R channel: 0-5 normalized to 0-1)
-	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor
-	surface_type = int(round(COLOR.r * 5.0));
+	// Decode surface type from vertex color (R channel: 0-9 normalized to 0-1)
+	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor,
+	// 6=fence_north, 7=fence_east, 8=fence_south, 9=fence_west
+	surface_type = int(round(COLOR.r * 9.0));
 	// Pass wall bounds from UV2 (used for wall alignment calculations)
 	wall_bounds = UV2;
 }
@@ -65,8 +66,9 @@ struct TileInfo {
 // Get tile data from data texture
 TileInfo get_tile_data(ivec2 cell, int surface) {
 	// Calculate UV for tile data texture
+	// Width = grid_width * 9 (5 surfaces + 4 fence surfaces per cell)
 	vec2 data_uv = vec2(
-		(float(cell.x * 5 + surface) + 0.5) / float(grid_size.x * 5),
+		(float(cell.x * 9 + surface) + 0.5) / float(grid_size.x * 9),
 		(float(cell.y) + 0.5) / float(grid_size.y)
 	);
 
@@ -188,19 +190,20 @@ vec2 get_surface_uv(vec3 pos, int surface, int align_mode, vec2 bounds) {
 
 void fragment() {
 	// Use surface type from vertex color (set by mesh builder)
-	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor
+	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor,
+	// 6=fence_north, 7=fence_east, 8=fence_south, 9=fence_west
 	int surface = surface_type;
 
-	// Adjust position for wall surfaces to get correct cell
-	// Walls are on cell boundaries, so we offset slightly into the correct cell
+	// Adjust position for wall/fence surfaces to get correct cell
+	// Walls/fences are on cell boundaries, so we offset slightly into the correct cell
 	vec3 adjusted_pos = local_position;
-	if (surface == 1) { // NORTH wall - at z = cell_z * cell_size
+	if (surface == 1 || surface == 6) { // NORTH wall/fence - at z = cell_z * cell_size
 		adjusted_pos.z += 0.01;
-	} else if (surface == 2) { // EAST wall - at x = (cell_x + 1) * cell_size
+	} else if (surface == 2 || surface == 7) { // EAST wall/fence - at x = (cell_x + 1) * cell_size
 		adjusted_pos.x -= 0.01;
-	} else if (surface == 3) { // SOUTH wall - at z = (cell_z + 1) * cell_size
+	} else if (surface == 3 || surface == 8) { // SOUTH wall/fence - at z = (cell_z + 1) * cell_size
 		adjusted_pos.z -= 0.01;
-	} else if (surface == 4) { // WEST wall - at x = cell_x * cell_size
+	} else if (surface == 4 || surface == 9) { // WEST wall/fence - at x = cell_x * cell_size
 		adjusted_pos.x += 0.01;
 	}
 
@@ -217,9 +220,16 @@ void fragment() {
 	int atlas_id = 0;
 	int wall_align = 0;
 
-	// Get tile data for non-floor surfaces (floor = 5)
-	if (surface < 5) {
-		TileInfo tile_info = get_tile_data(cell, surface);
+	// Get tile data for non-floor surfaces
+	// floor = 5 uses default, fence surfaces (6-9) use indices 5-8 in tile data
+	int data_surface = surface;
+	if (surface >= 6) {
+		// Map fence surfaces 6-9 to tile data indices 5-8
+		data_surface = surface - 1;
+	}
+
+	if (surface < 5 || surface >= 6) {
+		TileInfo tile_info = get_tile_data(cell, data_surface);
 		tile_x = tile_info.tile_x;
 		tile_y = tile_info.tile_y;
 		rotation = tile_info.rotation;
@@ -237,8 +247,16 @@ void fragment() {
 		}
 	}
 
-	// Get local UV within cell (wall_align and wall_bounds used for wall surfaces)
-	vec2 local_uv = get_surface_uv(local_position, surface, wall_align, wall_bounds);
+	// Map fence surfaces to their equivalent wall surface for UV calculation
+	int uv_surface = surface;
+	if (surface >= 6) {
+		// Fence surfaces use same UV logic as their wall counterparts
+		// 6 (fence_north) -> 1 (north), 7 -> 2, 8 -> 3, 9 -> 4
+		uv_surface = surface - 5;
+	}
+
+	// Get local UV within cell (wall_align and wall_bounds used for wall/fence surfaces)
+	vec2 local_uv = get_surface_uv(local_position, uv_surface, wall_align, wall_bounds);
 
 	// Apply rotation and flip transformations
 	local_uv = transform_uv(local_uv, rotation, flip_h, flip_v);

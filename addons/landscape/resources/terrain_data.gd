@@ -8,7 +8,10 @@ signal data_changed
 enum Corner { NW = 0, NE = 1, SE = 2, SW = 3 }
 
 # Surface types for tile painting
-enum Surface { TOP = 0, NORTH = 1, EAST = 2, SOUTH = 3, WEST = 4 }
+enum Surface {
+	TOP = 0, NORTH = 1, EAST = 2, SOUTH = 3, WEST = 4,
+	FENCE_NORTH = 5, FENCE_EAST = 6, FENCE_SOUTH = 7, FENCE_WEST = 8
+}
 
 # Tile rotation values
 enum Rotation { ROT_0 = 0, ROT_90 = 1, ROT_180 = 2, ROT_270 = 3 }
@@ -57,10 +60,12 @@ var _batch_changed: bool = false
 # Total size: grid_width * grid_depth * 13
 @export var cells: PackedInt32Array = PackedInt32Array()
 
-const CELL_DATA_SIZE := 13
+const CELL_DATA_SIZE := 21  # Was 13, now includes fence data
 const TOP_OFFSET := 0
 const FLOOR_OFFSET := 4
 const TILE_OFFSET := 8  # Start of tile data (5 surfaces: top, north, east, south, west)
+const FENCE_HEIGHT_OFFSET := 13  # 4 fence heights (north, east, south, west)
+const FENCE_TILE_OFFSET := 17  # 4 fence tiles (north, east, south, west)
 
 # Bit packing constants for tile values
 const TILE_INDEX_MASK := 0xFFFF      # Bits 0-15: tile index (0-65535)
@@ -71,6 +76,13 @@ const TILE_FLIP_V_BIT := 0x80000     # Bit 19: flip vertical
 const DIAGONAL_FLIP_BIT := 0x100000  # Bit 20: flip diagonal (stored in top tile only)
 const TILE_WALL_ALIGN_MASK := 0x300000   # Bits 20-21: wall alignment mode (for wall tiles)
 const TILE_WALL_ALIGN_SHIFT := 20
+
+# Fence height packing constants (single int32 per edge)
+# Bits 0-15: Left corner height (0 = no fence at this corner)
+# Bits 16-31: Right corner height
+const FENCE_HEIGHT_LEFT_MASK := 0xFFFF
+const FENCE_HEIGHT_RIGHT_MASK := 0xFFFF0000
+const FENCE_HEIGHT_RIGHT_SHIFT := 16
 
 
 func _init() -> void:
@@ -152,6 +164,8 @@ func set_top_corners(x: int, z: int, corners: Array[int]) -> void:
 			cells[idx + i] = corners[i]
 			changed = true
 	if changed:
+		# Note: Fence auto-delete is disabled because fences now use MAX height of both cells,
+		# so they're always visible from at least one side. Users can manually delete with shift+click.
 		if _batch_mode:
 			_batch_changed = true
 		else:
@@ -428,5 +442,313 @@ func get_surface_world_corners(x: int, z: int, surface: Surface) -> Array[Vector
 				Vector3(base_x, steps_to_world(floor[Corner.SW]), base_z + cell_size),
 			]
 
+		Surface.FENCE_NORTH, Surface.FENCE_EAST, Surface.FENCE_SOUTH, Surface.FENCE_WEST:
+			return get_fence_world_corners(x, z, surface)
+
 	# Fallback to top surface
 	return get_top_world_corners(x, z)
+
+
+# ============================================================================
+# FENCE METHODS
+# ============================================================================
+
+# Edge index for fence data (0=north, 1=east, 2=south, 3=west)
+static func _fence_edge_from_surface(surface: Surface) -> int:
+	match surface:
+		Surface.FENCE_NORTH: return 0
+		Surface.FENCE_EAST: return 1
+		Surface.FENCE_SOUTH: return 2
+		Surface.FENCE_WEST: return 3
+	return -1
+
+
+# Get fence heights for an edge as [left_height, right_height] in steps
+# Corner mapping for each edge:
+# NORTH: NW (left), NE (right)
+# EAST: NE (left), SE (right)
+# SOUTH: SE (left), SW (right)
+# WEST: SW (left), NW (right)
+func get_fence_heights(x: int, z: int, edge: int) -> Array[int]:
+	if not is_valid_cell(x, z) or edge < 0 or edge > 3:
+		return [0, 0]
+	var packed := cells[_cell_index(x, z) + FENCE_HEIGHT_OFFSET + edge]
+	var left := packed & FENCE_HEIGHT_LEFT_MASK
+	var right := (packed & FENCE_HEIGHT_RIGHT_MASK) >> FENCE_HEIGHT_RIGHT_SHIFT
+	return [left, right]
+
+
+# Set fence heights for an edge
+# Also handles auto-delete: when neighbor tile height >= fence top, fence data is removed
+# Also clears any conflicting fence on the neighbor cell (prevents overlapping fences)
+func set_fence_heights(x: int, z: int, edge: int, left: int, right: int) -> void:
+	if not is_valid_cell(x, z) or edge < 0 or edge > 3:
+		return
+
+	# Clamp heights to valid range (0-65535 due to 16-bit packing)
+	left = clampi(left, 0, 65535)
+	right = clampi(right, 0, 65535)
+
+	# Clear any conflicting fence on the neighbor (each physical edge should only have one fence)
+	if left > 0 or right > 0:
+		_clear_neighbor_fence(x, z, edge)
+
+	var packed := (left & FENCE_HEIGHT_LEFT_MASK) | ((right << FENCE_HEIGHT_RIGHT_SHIFT) & FENCE_HEIGHT_RIGHT_MASK)
+	var idx := _cell_index(x, z) + FENCE_HEIGHT_OFFSET + edge
+	if cells[idx] != packed:
+		cells[idx] = packed
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
+
+
+# Clear any fence on the neighbor cell that shares this edge
+func _clear_neighbor_fence(x: int, z: int, edge: int) -> void:
+	var neighbor_x := x
+	var neighbor_z := z
+	var neighbor_edge: int
+
+	# Map our edge to the neighbor's opposite edge
+	match edge:
+		0:  # NORTH -> neighbor to north's SOUTH
+			neighbor_z = z - 1
+			neighbor_edge = 2
+		1:  # EAST -> neighbor to east's WEST
+			neighbor_x = x + 1
+			neighbor_edge = 3
+		2:  # SOUTH -> neighbor to south's NORTH
+			neighbor_z = z + 1
+			neighbor_edge = 0
+		3:  # WEST -> neighbor to west's EAST
+			neighbor_x = x - 1
+			neighbor_edge = 1
+
+	if not is_valid_cell(neighbor_x, neighbor_z):
+		return
+
+	# Check if neighbor has a fence on the shared edge
+	var neighbor_idx := _cell_index(neighbor_x, neighbor_z) + FENCE_HEIGHT_OFFSET + neighbor_edge
+	if cells[neighbor_idx] != 0:
+		# Clear it (don't emit signal here, the main set will handle it)
+		cells[neighbor_idx] = 0
+		# Also clear the tile data for that fence
+		var tile_idx := _cell_index(neighbor_x, neighbor_z) + FENCE_TILE_OFFSET + neighbor_edge
+		cells[tile_idx] = 0
+
+
+# Get fence tile packed value for an edge
+func get_fence_tile_packed(x: int, z: int, edge: int) -> int:
+	if not is_valid_cell(x, z) or edge < 0 or edge > 3:
+		return 0
+	return cells[_cell_index(x, z) + FENCE_TILE_OFFSET + edge]
+
+
+# Set fence tile packed value for an edge
+func set_fence_tile_packed(x: int, z: int, edge: int, packed: int) -> void:
+	if not is_valid_cell(x, z) or edge < 0 or edge > 3:
+		return
+	var idx := _cell_index(x, z) + FENCE_TILE_OFFSET + edge
+	if cells[idx] != packed:
+		cells[idx] = packed
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
+
+
+# Check if a fence exists on an edge (either corner height > 0)
+func has_fence(x: int, z: int, edge: int) -> bool:
+	var heights := get_fence_heights(x, z, edge)
+	return heights[0] > 0 or heights[1] > 0
+
+
+# Clear fence data for an edge (set heights to 0)
+func clear_fence(x: int, z: int, edge: int) -> void:
+	set_fence_heights(x, z, edge, 0, 0)
+
+
+# Get all fence heights for a cell as [n_left, n_right, e_left, e_right, s_left, s_right, w_left, w_right]
+func get_all_fence_heights(x: int, z: int) -> Array[int]:
+	if not is_valid_cell(x, z):
+		return [0, 0, 0, 0, 0, 0, 0, 0]
+	var result: Array[int] = []
+	for edge in 4:
+		var heights := get_fence_heights(x, z, edge)
+		result.append(heights[0])
+		result.append(heights[1])
+	return result
+
+
+# Get all fence tiles for a cell as packed values
+func get_all_fence_tiles_packed(x: int, z: int) -> Array[int]:
+	if not is_valid_cell(x, z):
+		return [0, 0, 0, 0]
+	var idx := _cell_index(x, z) + FENCE_TILE_OFFSET
+	return [cells[idx], cells[idx + 1], cells[idx + 2], cells[idx + 3]]
+
+
+# Get world-space corner positions for a fence surface
+# Returns 4 corners in order: top-left, top-right, bottom-right, bottom-left
+# (clockwise when viewed from outside the cell)
+# Fence base is at the MAX height of both neighboring cells at each corner
+func get_fence_world_corners(x: int, z: int, surface: Surface) -> Array[Vector3]:
+	var edge := _fence_edge_from_surface(surface)
+	if edge < 0 or not is_valid_cell(x, z):
+		return [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+
+	var base_x := x * cell_size
+	var base_z := z * cell_size
+	var top := get_top_corners(x, z)
+	var fence_h := get_fence_heights(x, z, edge)
+
+	# Get neighbor's top corners for max height calculation
+	var neighbor_top: Array[int] = [0, 0, 0, 0]
+	var nx := x
+	var nz := z
+	match edge:
+		0: nz = z - 1  # NORTH
+		1: nx = x + 1  # EAST
+		2: nz = z + 1  # SOUTH
+		3: nx = x - 1  # WEST
+	if is_valid_cell(nx, nz):
+		neighbor_top = get_top_corners(nx, nz)
+
+	# Base heights at each corner - use MAX of both cells
+	# Fence extends UPWARD from the highest point at each corner
+	match edge:
+		0:  # NORTH: NW (left), NE (right) - neighbor's SW, SE
+			var base_left := steps_to_world(maxi(top[Corner.NW], neighbor_top[Corner.SW]))
+			var base_right := steps_to_world(maxi(top[Corner.NE], neighbor_top[Corner.SE]))
+			var top_left := base_left + steps_to_world(fence_h[0])
+			var top_right := base_right + steps_to_world(fence_h[1])
+			return [
+				Vector3(base_x, top_left, base_z),                      # top-left
+				Vector3(base_x + cell_size, top_right, base_z),         # top-right
+				Vector3(base_x + cell_size, base_right, base_z),        # bottom-right
+				Vector3(base_x, base_left, base_z),                     # bottom-left
+			]
+		1:  # EAST: NE (left), SE (right) - neighbor's NW, SW
+			var base_left := steps_to_world(maxi(top[Corner.NE], neighbor_top[Corner.NW]))
+			var base_right := steps_to_world(maxi(top[Corner.SE], neighbor_top[Corner.SW]))
+			var top_left := base_left + steps_to_world(fence_h[0])
+			var top_right := base_right + steps_to_world(fence_h[1])
+			return [
+				Vector3(base_x + cell_size, top_left, base_z),                      # top-left
+				Vector3(base_x + cell_size, top_right, base_z + cell_size),         # top-right
+				Vector3(base_x + cell_size, base_right, base_z + cell_size),        # bottom-right
+				Vector3(base_x + cell_size, base_left, base_z),                     # bottom-left
+			]
+		2:  # SOUTH: SE (left), SW (right) - neighbor's NE, NW
+			var base_left := steps_to_world(maxi(top[Corner.SE], neighbor_top[Corner.NE]))
+			var base_right := steps_to_world(maxi(top[Corner.SW], neighbor_top[Corner.NW]))
+			var top_left := base_left + steps_to_world(fence_h[0])
+			var top_right := base_right + steps_to_world(fence_h[1])
+			return [
+				Vector3(base_x + cell_size, top_left, base_z + cell_size),  # top-left
+				Vector3(base_x, top_right, base_z + cell_size),             # top-right
+				Vector3(base_x, base_right, base_z + cell_size),            # bottom-right
+				Vector3(base_x + cell_size, base_left, base_z + cell_size), # bottom-left
+			]
+		3:  # WEST: SW (left), NW (right) - neighbor's SE, NE
+			var base_left := steps_to_world(maxi(top[Corner.SW], neighbor_top[Corner.SE]))
+			var base_right := steps_to_world(maxi(top[Corner.NW], neighbor_top[Corner.NE]))
+			var top_left := base_left + steps_to_world(fence_h[0])
+			var top_right := base_right + steps_to_world(fence_h[1])
+			return [
+				Vector3(base_x, top_left, base_z + cell_size),  # top-left
+				Vector3(base_x, top_right, base_z),             # top-right
+				Vector3(base_x, base_right, base_z),            # bottom-right
+				Vector3(base_x, base_left, base_z + cell_size), # bottom-left
+			]
+
+	return [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+
+
+# Check and clear fences that are obscured by neighbor tile heights
+# Called after set_top_corners to maintain auto-delete behavior
+func _check_fence_auto_delete(x: int, z: int) -> void:
+	var top := get_top_corners(x, z)
+
+	# Check each edge of this cell and potentially the neighbors
+	# Edge 0 (NORTH): Check if neighbor to north (z-1) has SE/SW >= our fence top at NW/NE
+	# Edge 1 (EAST): Check if neighbor to east (x+1) has NW/SW >= our fence top at NE/SE
+	# Edge 2 (SOUTH): Check if neighbor to south (z+1) has NE/NW >= our fence top at SE/SW
+	# Edge 3 (WEST): Check if neighbor to west (x-1) has NE/SE >= our fence top at SW/NW
+
+	# Also check our own fences against neighbor's top heights
+	_check_fence_edge_auto_delete(x, z, 0, top)  # North edge
+	_check_fence_edge_auto_delete(x, z, 1, top)  # East edge
+	_check_fence_edge_auto_delete(x, z, 2, top)  # South edge
+	_check_fence_edge_auto_delete(x, z, 3, top)  # West edge
+
+	# Check neighbor's fences that share edges with this cell
+	if is_valid_cell(x, z - 1):  # North neighbor's south fence
+		var neighbor_top := get_top_corners(x, z - 1)
+		_check_fence_edge_auto_delete(x, z - 1, 2, neighbor_top)
+	if is_valid_cell(x + 1, z):  # East neighbor's west fence
+		var neighbor_top := get_top_corners(x + 1, z)
+		_check_fence_edge_auto_delete(x + 1, z, 3, neighbor_top)
+	if is_valid_cell(x, z + 1):  # South neighbor's north fence
+		var neighbor_top := get_top_corners(x, z + 1)
+		_check_fence_edge_auto_delete(x, z + 1, 0, neighbor_top)
+	if is_valid_cell(x - 1, z):  # West neighbor's east fence
+		var neighbor_top := get_top_corners(x - 1, z)
+		_check_fence_edge_auto_delete(x - 1, z, 1, neighbor_top)
+
+
+func _check_fence_edge_auto_delete(x: int, z: int, edge: int, top: Array[int]) -> void:
+	var fence_h := get_fence_heights(x, z, edge)
+	if fence_h[0] == 0 and fence_h[1] == 0:
+		return  # No fence to check
+
+	# Get neighbor cell and which corners to compare
+	var neighbor_x := x
+	var neighbor_z := z
+	var left_corner: int  # Our corner for left side of fence
+	var right_corner: int  # Our corner for right side of fence
+	var neighbor_left_corner: int  # Neighbor corner that aligns with our left
+	var neighbor_right_corner: int  # Neighbor corner that aligns with our right
+
+	match edge:
+		0:  # NORTH
+			neighbor_z = z - 1
+			left_corner = Corner.NW
+			right_corner = Corner.NE
+			neighbor_left_corner = Corner.SW
+			neighbor_right_corner = Corner.SE
+		1:  # EAST
+			neighbor_x = x + 1
+			left_corner = Corner.NE
+			right_corner = Corner.SE
+			neighbor_left_corner = Corner.NW
+			neighbor_right_corner = Corner.SW
+		2:  # SOUTH
+			neighbor_z = z + 1
+			left_corner = Corner.SE
+			right_corner = Corner.SW
+			neighbor_left_corner = Corner.NE
+			neighbor_right_corner = Corner.NW
+		3:  # WEST
+			neighbor_x = x - 1
+			left_corner = Corner.SW
+			right_corner = Corner.NW
+			neighbor_left_corner = Corner.SE
+			neighbor_right_corner = Corner.NE
+
+	if not is_valid_cell(neighbor_x, neighbor_z):
+		return  # No neighbor to check against
+
+	var neighbor_top := get_top_corners(neighbor_x, neighbor_z)
+
+	# Fence top heights (in steps)
+	var fence_top_left := top[left_corner] + fence_h[0]
+	var fence_top_right := top[right_corner] + fence_h[1]
+
+	# Check if neighbor's top >= fence top at each corner
+	var clear_left := neighbor_top[neighbor_left_corner] >= fence_top_left
+	var clear_right := neighbor_top[neighbor_right_corner] >= fence_top_right
+
+	# If both corners are obscured, clear the fence
+	if clear_left and clear_right:
+		clear_fence(x, z, edge)
