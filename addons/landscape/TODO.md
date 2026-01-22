@@ -3,8 +3,7 @@
 ## Next Steps (Priority Order)
 
 ### High Priority
-1. **Floor editing** - Tools to raise/lower floor surfaces
-2. **Custom tile atlas import** - Load user-provided tile atlases
+1. **Custom tile atlas import** - Load user-provided tile atlases
 
 ### Medium Priority
 4. **Keyboard shortcuts** - Quick tool switching (1-6 keys)
@@ -19,6 +18,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Floor sculpting** - Edit floor surfaces with improved constraints: floor can match top (flat surfaces), lowering top pushes floor down, minimum height of 0. Cell mode floor editing when viewing from below.
 - [x] **Fence tool** - Create vertical fences extending upward from tile edges with independent corner heights, double-sided geometry, editable from either side
 - [x] **Wall tile alignment modes** - Per-tile setting controlling vertical positioning on walls (World/Top/Bottom), follows sloped edges
 - [x] **Paint eyedropper** - Right-click on a painted cell to pick its tile, rotation, and flip settings
@@ -235,3 +235,18 @@
   - Each physical edge can only have one fence (auto-clears conflicting neighbor fence)
   - Paint tool extended to support fence surfaces
   - Full undo/redo support for fence create, modify, and delete
+
+### 2025-01-22 - Floor Sculpting
+- Improved floor editing constraints:
+  - Floor can now match top height (creates flat surface without walls)
+  - Changed constraint from `floor < top` to `floor <= top`
+  - Minimum height of 0 for both top and floor corners
+  - Lowering top below floor automatically pushes floor down
+- Floor detection improvements:
+  - Removed minimum height requirement check in `_should_edit_floor`
+  - Cell mode floor editing enabled when viewing from below (camera below floor height)
+  - Full cell editing (not just corners) when looking from underneath
+- Undo/redo updates:
+  - Always store original floor corners at drag start (for top editing that may push floor)
+  - Track floor corner changes when editing top corners
+  - Proper restoration of both top and floor on cancel

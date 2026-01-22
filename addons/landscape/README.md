@@ -11,6 +11,7 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Slope support** - individual corners can be raised/lowered within slope constraints (edge-adjacent only)
 - **Pixel art shader** - flat shading with tiled textures, supports atlas-based tile painting
 - **Drag-based sculpting** - click and drag to raise/lower terrain with camera-aware height tracking
+- **Floor sculpting** - edit floor surfaces by clicking below midpoint or viewing from below
 - **Smart corner detection** - automatically detects cell vs corner mode based on cursor position
 - **Paint tool** - paint tiles on any surface (top, north, south, east, west) with rotation/flip
 - **Flip diagonal tool** - toggle triangle diagonal direction for saddle-shaped terrain
@@ -28,7 +29,7 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 Each cell stores **8 corner heights** (4 for top, 4 for floor) plus **9 surface tiles** (5 walls + 4 fences):
 - Corners: NW, NE, SE, SW (clockwise from top-left when viewed from above)
 - Heights stored as integer steps, converted to world units via `height_step` multiplier
-- Floor must always be at or below top
+- Floor must always be at or below top (can be equal for flat surfaces without walls)
 - Surfaces: TOP, NORTH, EAST, SOUTH, WEST - each with tile index, rotation (0-3), flip_h, flip_v
 - Fences: Per-edge heights and tiles for FENCE_NORTH, FENCE_EAST, FENCE_SOUTH, FENCE_WEST
 
@@ -192,6 +193,10 @@ PBR shader with atlas-based tile texturing:
    - Height follows mouse position with camera perspective awareness
    - Adjacent corners are automatically pulled when slope limit is reached
    - Right-click to cancel drag and restore original heights
+   - **Floor editing**: Click below the midpoint of a wall, or look from below to edit floor instead of top
+   - Floor can be raised to match top (creates flat surface without walls)
+   - Lowering top below floor will push floor down automatically
+   - Heights cannot go below 0
 5. Use the **Paint** tool:
    - Click "Generate Placeholder Tiles" to create a test tileset
    - Select a tile from the palette
@@ -270,9 +275,9 @@ PBR shader with atlas-based tile texturing:
 - [x] Surface lock (hold Shift to paint only on one surface type)
 - [x] Wall tile alignment modes (World/Top/Bottom) for controlling vertical tile positioning on walls
 - [x] Fence tool - create vertical fences extending upward from tile edges with independent corner heights
+- [x] Floor sculpting - edit floor surfaces with full constraint system (floor ≤ top, heights ≥ 0)
 
 ### Not Yet Implemented
-- [ ] Floor editing tools
 - [ ] Multi-cell selection
 - [ ] Import/export terrain data
 - [ ] LOD for large terrains

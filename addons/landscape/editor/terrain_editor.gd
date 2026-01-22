@@ -3,7 +3,7 @@ class_name TerrainEditor
 extends RefCounted
 
 enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN, MOUNTAIN, FENCE }
-enum HoverMode { CELL, CORNER }
+enum HoverMode { CELL, CORNER, FLOOR_CORNER }
 enum FenceHover { NONE, LEFT_CORNER, RIGHT_CORNER, MIDDLE }
 
 signal tool_changed(new_tool: Tool)
@@ -101,6 +101,15 @@ var _drag_brush_original_corners: Dictionary = {}  # Original corners for each c
 var _drag_sticky_corners: Array[int] = []  # Current heights for non-dragged corners (sticky per step)
 var _drag_brush_min_height: int = 0  # Min corner height across all brush cells at drag start
 var _drag_brush_max_height: int = 0  # Max corner height across all brush cells at drag start
+
+# Floor editing state
+var _hover_editing_floor: bool = false
+var _drag_editing_floor: bool = false
+var _drag_floor_original_corners: Array[int] = []
+var _drag_floor_sticky_corners: Array[int] = []
+var _drag_brush_floor_original_corners: Dictionary = {}  # Floor corners for each cell in brush: "x,z" -> Array[int]
+var _drag_floor_brush_min_height: int = 0  # Min floor corner height across all brush cells
+var _drag_floor_brush_max_height: int = 0  # Max floor corner height across all brush cells
 var _drag_mountain_all_cells: Array[Vector2i] = []  # All cells affected by mountain tool (core + slopes)
 var _drag_mountain_original_corners: Dictionary = {}  # Original corners for all mountain-affected cells
 var _drag_mountain_corner_distances: Dictionary = {}  # Precomputed corner distances from core
@@ -158,6 +167,7 @@ func _clear_hover() -> void:
 		_hovered_cell = Vector2i(-1, -1)
 		_hovered_corner = -1
 		_hover_mode = HoverMode.CELL
+		_hover_editing_floor = false
 		hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
 	# Clear buffer-based paint preview
 	if _terrain:
@@ -181,11 +191,68 @@ func get_current_height() -> float:
 
 	if mode == HoverMode.CORNER and corner >= 0:
 		return data.steps_to_world(corners[corner])
+	elif mode == HoverMode.FLOOR_CORNER and corner >= 0:
+		var floor_corners := data.get_floor_corners(cell.x, cell.y)
+		return data.steps_to_world(floor_corners[corner])
 	else:
 		var avg := 0.0
 		for c in corners:
 			avg += data.steps_to_world(c)
 		return avg / 4.0
+
+
+func _should_edit_floor(hit_pos: Vector3, cell: Vector2i, surface: TerrainData.Surface, data: TerrainData) -> bool:
+	# Get top and floor corners
+	var top_corners := data.get_top_corners(cell.x, cell.y)
+	var floor_corners := data.get_floor_corners(cell.x, cell.y)
+
+	var local_hit := _terrain.to_local(hit_pos)
+
+	# For TOP surface, check if we're hitting the floor (bottom) rather than the top
+	# This happens when the hit Y is closer to floor height than top height
+	if surface == TerrainData.Surface.TOP:
+		var avg_top := (data.steps_to_world(top_corners[0]) + data.steps_to_world(top_corners[1]) +
+					   data.steps_to_world(top_corners[2]) + data.steps_to_world(top_corners[3])) / 4.0
+		var avg_floor := (data.steps_to_world(floor_corners[0]) + data.steps_to_world(floor_corners[1]) +
+						 data.steps_to_world(floor_corners[2]) + data.steps_to_world(floor_corners[3])) / 4.0
+
+		# If looking from below (camera below surface), edit floor for the full cell
+		if _last_camera:
+			var local_camera := _terrain.to_local(_last_camera.global_position)
+			if local_camera.y < avg_floor:
+				return true
+
+		var mid_height := (avg_top + avg_floor) / 2.0
+		return local_hit.y < mid_height
+
+	# For wall surfaces, check if below midpoint
+	if surface >= TerrainData.Surface.NORTH and surface <= TerrainData.Surface.WEST:
+		# Determine which corners are relevant for this wall edge
+		var left_corner: int
+		var right_corner: int
+		match surface:
+			TerrainData.Surface.NORTH:
+				left_corner = TerrainData.Corner.NW
+				right_corner = TerrainData.Corner.NE
+			TerrainData.Surface.EAST:
+				left_corner = TerrainData.Corner.NE
+				right_corner = TerrainData.Corner.SE
+			TerrainData.Surface.SOUTH:
+				left_corner = TerrainData.Corner.SE
+				right_corner = TerrainData.Corner.SW
+			TerrainData.Surface.WEST:
+				left_corner = TerrainData.Corner.SW
+				right_corner = TerrainData.Corner.NW
+			_:
+				return false
+
+		# Calculate midpoint height between top and floor
+		var top_height := (data.steps_to_world(top_corners[left_corner]) + data.steps_to_world(top_corners[right_corner])) / 2.0
+		var floor_height := (data.steps_to_world(floor_corners[left_corner]) + data.steps_to_world(floor_corners[right_corner])) / 2.0
+		var mid_height := (top_height + floor_height) / 2.0
+		return local_hit.y < mid_height
+
+	return false
 
 
 func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain) -> bool:
@@ -354,6 +421,8 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = fal
 	_drag_start_mouse_y = mouse_pos.y
 
 	# For brush size > 1, force cell mode (corner mode doesn't make sense for multi-cell)
+	# But allow floor editing with larger brushes
+	_drag_editing_floor = _hover_editing_floor
 	if brush_size > 1:
 		_drag_mode = HoverMode.CELL
 	else:
@@ -366,11 +435,22 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = fal
 		_drag_original_corners.append(c)
 	_drag_sticky_corners = _drag_original_corners.duplicate()
 
+	# Store floor original heights if editing floor (for single corner mode)
+	if _drag_editing_floor:
+		_drag_floor_original_corners = []
+		var floor_corners := data.get_floor_corners(_drag_cell.x, _drag_cell.y)
+		for c in floor_corners:
+			_drag_floor_original_corners.append(c)
+		_drag_floor_sticky_corners = _drag_floor_original_corners.duplicate()
+
 	# Store original heights for all brush cells and find min/max
 	_drag_brush_cells = get_brush_cells(_drag_cell, data, _brush_corner)
 	_drag_brush_original_corners.clear()
+	_drag_brush_floor_original_corners.clear()
 	_drag_brush_min_height = 999999
 	_drag_brush_max_height = -999999
+	_drag_floor_brush_min_height = 999999
+	_drag_floor_brush_max_height = -999999
 	for cell in _drag_brush_cells:
 		var key := "%d,%d" % [cell.x, cell.y]
 		var cell_corners := data.get_top_corners(cell.x, cell.y)
@@ -378,6 +458,12 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = fal
 		for c in cell_corners:
 			_drag_brush_min_height = mini(_drag_brush_min_height, c)
 			_drag_brush_max_height = maxi(_drag_brush_max_height, c)
+		# Always store floor corners for undo/redo (top editing may push floor down)
+		var cell_floor_corners := data.get_floor_corners(cell.x, cell.y)
+		_drag_brush_floor_original_corners[key] = cell_floor_corners.duplicate()
+		for c in cell_floor_corners:
+			_drag_floor_brush_min_height = mini(_drag_floor_brush_min_height, c)
+			_drag_floor_brush_max_height = maxi(_drag_floor_brush_max_height, c)
 
 	# For mountain tool, also store surrounding cells that may be affected by slopes
 	if current_tool == Tool.MOUNTAIN:
@@ -509,11 +595,33 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 		_apply_mountain_heights(data, _drag_current_delta)
 		var world_height := data.steps_to_world(_drag_brush_min_height + _drag_current_delta)
 		height_changed.emit(world_height, -1, _drag_mode)
+	elif _drag_mode == HoverMode.FLOOR_CORNER:
+		# Floor corner mode - edit floor corners
+		var corner_target := _drag_floor_original_corners[_drag_corner] + _drag_current_delta
+		var new_corners := _calculate_floor_dragged_corners(_drag_corner, corner_target, data)
+		data.set_floor_corners(_drag_cell.x, _drag_cell.y, new_corners)
+		var world_height := data.steps_to_world(new_corners[_drag_corner])
+		height_changed.emit(world_height, _drag_corner, _drag_mode)
 	elif _drag_mode == HoverMode.CORNER:
 		# Single corner mode (only for brush_size == 0)
 		var corner_target := _drag_original_corners[_drag_corner] + _drag_current_delta
 		var new_corners := _calculate_dragged_corners(_drag_corner, corner_target, data.max_slope_steps)
+		# Enforce minimum height >= 0
+		for i in 4:
+			new_corners[i] = maxi(new_corners[i], 0)
 		data.set_top_corners(_drag_cell.x, _drag_cell.y, new_corners)
+		# Push floor down if top goes below floor
+		var floor_corners := data.get_floor_corners(_drag_cell.x, _drag_cell.y)
+		var floor_changed := false
+		var new_floor: Array[int] = []
+		for i in 4:
+			if floor_corners[i] > new_corners[i]:
+				new_floor.append(new_corners[i])
+				floor_changed = true
+			else:
+				new_floor.append(floor_corners[i])
+		if floor_changed:
+			data.set_floor_corners(_drag_cell.x, _drag_cell.y, new_floor)
 		var world_height := data.steps_to_world(new_corners[_drag_corner])
 		height_changed.emit(world_height, _drag_corner, _drag_mode)
 	elif brush_size == 1:
@@ -521,16 +629,40 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 		data.begin_batch()
 		for cell in _drag_brush_cells:
 			var key := "%d,%d" % [cell.x, cell.y]
-			var original: Array = _drag_brush_original_corners[key]
-			var new_corners: Array[int] = []
-			for i in 4:
-				new_corners.append(original[i] + _drag_current_delta)
-			data.set_top_corners(cell.x, cell.y, new_corners)
+			if _drag_editing_floor:
+				var original: Array = _drag_brush_floor_original_corners[key]
+				var top_corners := data.get_top_corners(cell.x, cell.y)
+				var new_corners: Array[int] = []
+				for i in 4:
+					# Constraint: floor cannot exceed top and must be >= 0
+					var target: int = int(original[i]) + _drag_current_delta
+					new_corners.append(mini(maxi(target, 0), top_corners[i]))
+				data.set_floor_corners(cell.x, cell.y, new_corners)
+			else:
+				var original: Array = _drag_brush_original_corners[key]
+				var new_corners: Array[int] = []
+				for i in 4:
+					# Enforce minimum height >= 0
+					new_corners.append(maxi(original[i] + _drag_current_delta, 0))
+				data.set_top_corners(cell.x, cell.y, new_corners)
+				# Push floor down if top goes below floor
+				var floor_corners := data.get_floor_corners(cell.x, cell.y)
+				var floor_changed := false
+				var new_floor: Array[int] = []
+				for i in 4:
+					if floor_corners[i] > new_corners[i]:
+						new_floor.append(new_corners[i])
+						floor_changed = true
+					else:
+						new_floor.append(floor_corners[i])
+				if floor_changed:
+					data.set_floor_corners(cell.x, cell.y, new_floor)
 		data.end_batch()
 
 		# Report height for center cell
 		var avg_height := 0.0
-		for c in _drag_original_corners:
+		var original_corners: Array = _drag_floor_original_corners if _drag_editing_floor else _drag_original_corners
+		for c in original_corners:
 			avg_height += data.steps_to_world(c + _drag_current_delta)
 		avg_height /= 4.0
 		height_changed.emit(avg_height, -1, _drag_mode)
@@ -539,23 +671,55 @@ func _update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 		# When raising: bring low corners up toward target (min + delta)
 		# When lowering: bring high corners down toward target (max + delta)
 		var target_height: int
-		if _drag_current_delta >= 0:
-			target_height = _drag_brush_min_height + _drag_current_delta
+		if _drag_editing_floor:
+			if _drag_current_delta >= 0:
+				target_height = _drag_floor_brush_min_height + _drag_current_delta
+			else:
+				target_height = _drag_floor_brush_max_height + _drag_current_delta
 		else:
-			target_height = _drag_brush_max_height + _drag_current_delta
+			if _drag_current_delta >= 0:
+				target_height = _drag_brush_min_height + _drag_current_delta
+			else:
+				target_height = _drag_brush_max_height + _drag_current_delta
 
 		data.begin_batch()
 		for cell in _drag_brush_cells:
-			var current_corners := data.get_top_corners(cell.x, cell.y)
-			var new_corners: Array[int] = []
-			for i in 4:
-				if _drag_current_delta >= 0:
-					# Raising: corners move up toward target, never down
-					new_corners.append(maxi(current_corners[i], target_height))
-				else:
-					# Lowering: corners move down toward target, never up
-					new_corners.append(mini(current_corners[i], target_height))
-			data.set_top_corners(cell.x, cell.y, new_corners)
+			if _drag_editing_floor:
+				var current_corners := data.get_floor_corners(cell.x, cell.y)
+				var top_corners := data.get_top_corners(cell.x, cell.y)
+				var new_corners: Array[int] = []
+				for i in 4:
+					var corner_target: int
+					if _drag_current_delta >= 0:
+						corner_target = maxi(current_corners[i], target_height)
+					else:
+						corner_target = mini(current_corners[i], target_height)
+					# Constraint: floor cannot exceed top and must be >= 0
+					new_corners.append(mini(maxi(corner_target, 0), top_corners[i]))
+				data.set_floor_corners(cell.x, cell.y, new_corners)
+			else:
+				var current_corners := data.get_top_corners(cell.x, cell.y)
+				var new_corners: Array[int] = []
+				for i in 4:
+					if _drag_current_delta >= 0:
+						# Raising: corners move up toward target, never down
+						new_corners.append(maxi(current_corners[i], target_height))
+					else:
+						# Lowering: corners move down toward target, never up (min 0)
+						new_corners.append(maxi(mini(current_corners[i], target_height), 0))
+				data.set_top_corners(cell.x, cell.y, new_corners)
+				# Push floor down if top goes below floor
+				var floor_corners := data.get_floor_corners(cell.x, cell.y)
+				var floor_changed := false
+				var new_floor: Array[int] = []
+				for i in 4:
+					if floor_corners[i] > new_corners[i]:
+						new_floor.append(new_corners[i])
+						floor_changed = true
+					else:
+						new_floor.append(floor_corners[i])
+				if floor_changed:
+					data.set_floor_corners(cell.x, cell.y, new_floor)
 		data.end_batch()
 
 		# Report target height
@@ -601,10 +765,72 @@ func _calculate_dragged_corners(dragged_corner: int, target_height: int, max_slo
 		max_h = mini(max_h, corners[adj] + max_slope)
 	corners[diagonal_corner] = clampi(corners[diagonal_corner], min_h, max_h)
 
+	# Enforce minimum height >= 0 for all corners
+	for i in 4:
+		corners[i] = maxi(corners[i], 0)
+
 	# Update sticky corners for non-dragged corners
 	for i in 4:
 		if i != dragged_corner:
 			_drag_sticky_corners[i] = corners[i]
+
+	return corners
+
+
+func _calculate_floor_dragged_corners(dragged_corner: int, target_height: int, data: TerrainData) -> Array[int]:
+	var top_corners := data.get_top_corners(_drag_cell.x, _drag_cell.y)
+	var max_slope := data.max_slope_steps
+
+	# Start with sticky corners for non-dragged, target for dragged
+	var corners: Array[int] = []
+	for i in 4:
+		if i == dragged_corner:
+			# Constraint: floor cannot exceed top and must be >= 0
+			var max_floor := top_corners[i]
+			corners.append(mini(maxi(target_height, 0), max_floor))
+		else:
+			corners.append(_drag_floor_sticky_corners[i])
+
+	# Edge-adjacent corners (NW=0, NE=1, SE=2, SW=3)
+	var adjacents := [
+		[1, 3],  # NW -> NE, SW
+		[0, 2],  # NE -> NW, SE
+		[1, 3],  # SE -> NE, SW
+		[0, 2],  # SW -> NW, SE
+	]
+
+	# Diagonal corner for each corner
+	var diagonal: Array[int] = [2, 3, 0, 1]  # NW->SE, NE->SW, SE->NW, SW->NE
+
+	# Process in order: dragged corner, then adjacent corners, then diagonal corner
+	var adjacent_corners: Array = adjacents[dragged_corner]
+	var diagonal_corner: int = diagonal[dragged_corner]
+
+	# Constrain adjacent corners to dragged corner (only move if slope constraint requires it)
+	# Also ensure each corner respects top limit and >= 0
+	for adj in adjacent_corners:
+		var min_h := corners[dragged_corner] - max_slope
+		var max_h := corners[dragged_corner] + max_slope
+		# Also constrain to top and minimum 0
+		max_h = mini(max_h, top_corners[adj])
+		min_h = maxi(min_h, 0)
+		corners[adj] = clampi(corners[adj], min_h, max_h)
+
+	# Constrain diagonal corner to both adjacent corners
+	var min_h := -999999
+	var max_h := 999999
+	for adj in adjacent_corners:
+		min_h = maxi(min_h, corners[adj] - max_slope)
+		max_h = mini(max_h, corners[adj] + max_slope)
+	# Also constrain to top and minimum 0
+	max_h = mini(max_h, top_corners[diagonal_corner])
+	min_h = maxi(min_h, 0)
+	corners[diagonal_corner] = clampi(corners[diagonal_corner], min_h, max_h)
+
+	# Update sticky corners for non-dragged corners
+	for i in 4:
+		if i != dragged_corner:
+			_drag_floor_sticky_corners[i] = corners[i]
 
 	return corners
 
@@ -662,6 +888,25 @@ func _finish_drag() -> void:
 		_is_dragging = false
 		return
 
+	# Handle floor editing
+	if _drag_editing_floor:
+		undo_redo.create_action("Sculpt Floor")
+		for cell in _drag_brush_cells:
+			var key := "%d,%d" % [cell.x, cell.y]
+			if not _drag_brush_floor_original_corners.has(key):
+				continue
+			var original: Array = _drag_brush_floor_original_corners[key]
+			var final_corners := data.get_floor_corners(cell.x, cell.y)
+			var original_typed: Array[int] = []
+			for c in original:
+				original_typed.append(c)
+			if original_typed != final_corners:
+				undo_redo.add_do_method(data, "set_floor_corners", cell.x, cell.y, final_corners)
+				undo_redo.add_undo_method(data, "set_floor_corners", cell.x, cell.y, original_typed)
+		undo_redo.commit_action(false)
+		_is_dragging = false
+		return
+
 	# Create undo/redo action for the final change
 	var action_name := "Mountain Terrain" if current_tool == Tool.MOUNTAIN else "Sculpt Terrain"
 	undo_redo.create_action(action_name)
@@ -691,6 +936,20 @@ func _finish_drag() -> void:
 			undo_redo.add_do_method(data, "set_top_corners", cell.x, cell.y, final_corners)
 			undo_redo.add_undo_method(data, "set_top_corners", cell.x, cell.y, original_typed)
 
+	# Also track floor corner changes (top editing may have pushed floor down)
+	for cell in _drag_brush_cells:
+		var key := "%d,%d" % [cell.x, cell.y]
+		if not _drag_brush_floor_original_corners.has(key):
+			continue
+		var floor_original: Array = _drag_brush_floor_original_corners[key]
+		var floor_final := data.get_floor_corners(cell.x, cell.y)
+		var floor_original_typed: Array[int] = []
+		for c in floor_original:
+			floor_original_typed.append(c)
+		if floor_original_typed != floor_final:
+			undo_redo.add_do_method(data, "set_floor_corners", cell.x, cell.y, floor_final)
+			undo_redo.add_undo_method(data, "set_floor_corners", cell.x, cell.y, floor_original_typed)
+
 	undo_redo.commit_action(false)  # Don't execute, already applied
 
 	_is_dragging = false
@@ -703,10 +962,27 @@ func _cancel_drag() -> void:
 
 	var data := _terrain.terrain_data
 	if data:
+		# Handle floor editing - restore all brush cells
+		if _drag_editing_floor:
+			data.begin_batch()
+			for cell in _drag_brush_cells:
+				var key := "%d,%d" % [cell.x, cell.y]
+				if not _drag_brush_floor_original_corners.has(key):
+					continue
+				var original: Array = _drag_brush_floor_original_corners[key]
+				var original_typed: Array[int] = []
+				for c in original:
+					original_typed.append(c)
+				data.set_floor_corners(cell.x, cell.y, original_typed)
+			data.end_batch()
+			_is_dragging = false
+			return
+
 		# Use mountain cells if mountain tool, otherwise brush cells
 		var cells_to_restore: Array[Vector2i] = _drag_mountain_all_cells if current_tool == Tool.MOUNTAIN else _drag_brush_cells
 		var use_vector_keys := current_tool == Tool.MOUNTAIN
 
+		data.begin_batch()
 		for cell in cells_to_restore:
 			var original: Array
 			if use_vector_keys:
@@ -723,6 +999,18 @@ func _cancel_drag() -> void:
 			for c in original:
 				original_typed.append(c)
 			data.set_top_corners(cell.x, cell.y, original_typed)
+
+		# Also restore floor corners (top editing may have pushed floor down)
+		for cell in _drag_brush_cells:
+			var key := "%d,%d" % [cell.x, cell.y]
+			if not _drag_brush_floor_original_corners.has(key):
+				continue
+			var floor_original: Array = _drag_brush_floor_original_corners[key]
+			var floor_original_typed: Array[int] = []
+			for c in floor_original:
+				floor_original_typed.append(c)
+			data.set_floor_corners(cell.x, cell.y, floor_original_typed)
+		data.end_batch()
 
 	_is_dragging = false
 
@@ -773,7 +1061,10 @@ func _finish_paint_drag() -> void:
 		return
 
 	# Create undo/redo action from preview data
+	# Wrap in batch mode to avoid emitting data_changed for each tile
 	undo_redo.create_action("Paint Terrain Tiles")
+	undo_redo.add_do_method(data, "begin_batch")
+	undo_redo.add_undo_method(data, "begin_batch")
 	for key: String in _paint_preview_buffer.keys():
 		var parts: PackedStringArray = key.split(",")
 		var x := int(parts[0])
@@ -790,6 +1081,8 @@ func _finish_paint_drag() -> void:
 		else:
 			undo_redo.add_do_method(data, "set_tile_packed", x, z, surface, new_packed)
 			undo_redo.add_undo_method(data, "set_tile_packed", x, z, surface, old_packed)
+	undo_redo.add_do_method(data, "end_batch")
+	undo_redo.add_undo_method(data, "end_batch")
 	undo_redo.commit_action()
 
 	# Clear preview
@@ -940,11 +1233,24 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = f
 	# For sculpt/flatten tools, also track corner hover mode
 	_hovered_corner = closest_corner
 
+	# Determine floor editing based on hit position (wall or bottom surface)
+	_hover_editing_floor = _should_edit_floor(hit_pos, _hovered_cell, _hovered_surface, _terrain.terrain_data)
+
 	# Determine mode based on distance to corner
 	if min_dist < CORNER_THRESHOLD:
-		_hover_mode = HoverMode.CORNER
+		_hover_mode = HoverMode.FLOOR_CORNER if _hover_editing_floor else HoverMode.CORNER
 	else:
 		_hover_mode = HoverMode.CELL
+		# Allow cell mode floor editing when looking from below
+		if _hover_editing_floor and _last_camera:
+			var floor_corners := _terrain.terrain_data.get_floor_corners(_hovered_cell.x, _hovered_cell.y)
+			var avg_floor := (_terrain.terrain_data.steps_to_world(floor_corners[0]) +
+							  _terrain.terrain_data.steps_to_world(floor_corners[1]) +
+							  _terrain.terrain_data.steps_to_world(floor_corners[2]) +
+							  _terrain.terrain_data.steps_to_world(floor_corners[3])) / 4.0
+			var local_camera := _terrain.to_local(_last_camera.global_position)
+			if local_camera.y >= avg_floor:
+				_hover_editing_floor = false  # Only disable if not looking from below
 
 	if old_cell != _hovered_cell or old_corner != _hovered_corner or old_mode != _hover_mode:
 		hover_changed.emit(_hovered_cell, _hovered_corner, _hover_mode)
@@ -1398,20 +1704,32 @@ func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 	# Sculpt tool: draw cell/corner highlight
 	var display_corner := _drag_corner if _is_dragging else _hovered_corner
 	var display_mode := _drag_mode if _is_dragging else _hover_mode
+	var is_floor_editing := _drag_editing_floor if _is_dragging else _hover_editing_floor
 
 	# For brush size > 1, force cell mode display
 	if brush_size > 1:
 		display_mode = HoverMode.CELL
 
-	var color := Color.YELLOW if not _is_dragging else Color.GREEN
+	# Use cyan for floor editing, yellow/green for top editing
+	var color: Color
+	if is_floor_editing:
+		color = Color.CYAN if not _is_dragging else Color.GREEN
+	else:
+		color = Color.YELLOW if not _is_dragging else Color.GREEN
 
 	if display_mode == HoverMode.CORNER and display_corner >= 0:
 		# Corner mode: highlight the specific corner area (only for single cell)
 		_draw_corner_highlight(overlay, camera, terrain, data, display_cell, display_corner, color)
+	elif display_mode == HoverMode.FLOOR_CORNER and display_corner >= 0:
+		# Floor corner mode: highlight the specific floor corner area
+		_draw_corner_highlight(overlay, camera, terrain, data, display_cell, display_corner, color, true)
 	else:
-		# Cell mode: highlight the entire top surface for all brush cells
+		# Cell mode: highlight the entire surface for all brush cells
 		for cell in brush_cells:
-			_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, color)
+			if is_floor_editing:
+				_draw_floor_surface_highlight(overlay, camera, terrain, data, cell, color)
+			else:
+				_draw_surface_highlight(overlay, camera, terrain, data, cell, TerrainData.Surface.TOP, color)
 
 
 func _draw_surface_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, surface: TerrainData.Surface, color: Color = Color.CYAN) -> void:
@@ -1470,6 +1788,39 @@ func _draw_surface_outline(overlay: Control, camera: Camera3D, terrain: Landscap
 	for i in 4:
 		var next := (i + 1) % 4
 		overlay.draw_line(screen_points[i], screen_points[next], outline_color, 2.0)
+
+
+func _draw_floor_surface_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, color: Color = Color.CYAN) -> void:
+	# Get floor corners in world space
+	var floor_corners := data.get_floor_world_corners(cell.x, cell.y)
+
+	# Transform to screen space
+	var screen_points: Array[Vector2] = []
+	var any_behind := false
+	for corner in floor_corners:
+		var world_pos := terrain.to_global(corner)
+		if camera.is_position_behind(world_pos):
+			any_behind = true
+			break
+		screen_points.append(camera.unproject_position(world_pos))
+
+	if any_behind or screen_points.size() != 4:
+		return
+
+	# Draw outline
+	var outline_color := color
+	outline_color.a = 0.9
+	for i in 4:
+		var next := (i + 1) % 4
+		overlay.draw_line(screen_points[i], screen_points[next], outline_color, 3.0)
+
+	# Draw filled quad as two triangles
+	var fill_color := color
+	fill_color.a = 0.25
+	var tri1 := PackedVector2Array([screen_points[0], screen_points[1], screen_points[2]])
+	var tri2 := PackedVector2Array([screen_points[0], screen_points[2], screen_points[3]])
+	overlay.draw_colored_polygon(tri1, fill_color)
+	overlay.draw_colored_polygon(tri2, fill_color)
 
 
 func _draw_tile_preview(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, surface: TerrainData.Surface) -> void:
@@ -1585,9 +1936,9 @@ func _draw_diagonal_indicator(overlay: Control, camera: Camera3D, terrain: Lands
 	overlay.draw_line(screen1, screen2, Color.ORANGE, 3.0)
 
 
-func _draw_corner_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, corner: int, color: Color) -> void:
-	# Get top corners in world space
-	var top_corners := data.get_top_world_corners(cell.x, cell.y)
+func _draw_corner_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, corner: int, color: Color, is_floor: bool = false) -> void:
+	# Get corners in world space (top or floor depending on mode)
+	var top_corners := data.get_floor_world_corners(cell.x, cell.y) if is_floor else data.get_top_world_corners(cell.x, cell.y)
 
 	# Calculate corner area (quadrilateral from corner to midpoints of adjacent edges)
 	var corner_pos := top_corners[corner]

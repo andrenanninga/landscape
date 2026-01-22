@@ -217,7 +217,10 @@ func set_floor_corners(x: int, z: int, corners: Array[int]) -> void:
 			cells[idx + i] = corners[i]
 			changed = true
 	if changed:
-		data_changed.emit()
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
 
 
 # Tile packing/unpacking utilities
@@ -255,7 +258,10 @@ func set_tile_packed(x: int, z: int, surface: Surface, packed: int) -> void:
 	var idx := _cell_index(x, z) + TILE_OFFSET + surface
 	if cells[idx] != packed:
 		cells[idx] = packed
-		data_changed.emit()
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
 
 
 # Tile accessors - convenience methods for individual components
