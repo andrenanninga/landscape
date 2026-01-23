@@ -67,15 +67,15 @@ const TILE_OFFSET := 8  # Start of tile data (5 surfaces: top, north, east, sout
 const FENCE_HEIGHT_OFFSET := 13  # 4 fence heights (north, east, south, west)
 const FENCE_TILE_OFFSET := 17  # 4 fence tiles (north, east, south, west)
 
-# Bit packing constants for tile values
-const TILE_INDEX_MASK := 0xFFFF      # Bits 0-15: tile index (0-65535)
-const TILE_ROTATION_MASK := 0x30000  # Bits 16-17: rotation (0-3)
-const TILE_ROTATION_SHIFT := 16
-const TILE_FLIP_H_BIT := 0x40000     # Bit 18: flip horizontal
-const TILE_FLIP_V_BIT := 0x80000     # Bit 19: flip vertical
-const DIAGONAL_FLIP_BIT := 0x100000  # Bit 20: flip diagonal (stored in top tile only)
-const TILE_WALL_ALIGN_MASK := 0x300000   # Bits 20-21: wall alignment mode (for wall tiles)
-const TILE_WALL_ALIGN_SHIFT := 20
+# Bit packing constants - delegated to TilePacking for single source of truth
+const TILE_INDEX_MASK := TilePacking.TILE_INDEX_MASK
+const TILE_ROTATION_MASK := TilePacking.TILE_ROTATION_MASK
+const TILE_ROTATION_SHIFT := TilePacking.TILE_ROTATION_SHIFT
+const TILE_FLIP_H_BIT := TilePacking.TILE_FLIP_H_BIT
+const TILE_FLIP_V_BIT := TilePacking.TILE_FLIP_V_BIT
+const DIAGONAL_FLIP_BIT := TilePacking.DIAGONAL_FLIP_BIT
+const TILE_WALL_ALIGN_MASK := TilePacking.TILE_WALL_ALIGN_MASK
+const TILE_WALL_ALIGN_SHIFT := TilePacking.TILE_WALL_ALIGN_SHIFT
 
 # Fence height packing constants (single int32 per edge)
 # Bits 0-15: Left corner height (0 = no fence at this corner)
@@ -223,26 +223,13 @@ func set_floor_corners(x: int, z: int, corners: Array[int]) -> void:
 			data_changed.emit()
 
 
-# Tile packing/unpacking utilities
+# Tile packing/unpacking utilities - delegate to TilePacking
 static func pack_tile(tile_index: int, rotation: Rotation = Rotation.ROT_0, flip_h: bool = false, flip_v: bool = false, wall_align: WallAlign = WallAlign.WORLD) -> int:
-	var packed := tile_index & TILE_INDEX_MASK
-	packed |= (rotation << TILE_ROTATION_SHIFT)
-	if flip_h:
-		packed |= TILE_FLIP_H_BIT
-	if flip_v:
-		packed |= TILE_FLIP_V_BIT
-	packed |= (wall_align << TILE_WALL_ALIGN_SHIFT)
-	return packed
+	return TilePacking.pack(tile_index, rotation, flip_h, flip_v, wall_align)
 
 
 static func unpack_tile(packed: int) -> Dictionary:
-	return {
-		"tile_index": packed & TILE_INDEX_MASK,
-		"rotation": (packed & TILE_ROTATION_MASK) >> TILE_ROTATION_SHIFT,
-		"flip_h": (packed & TILE_FLIP_H_BIT) != 0,
-		"flip_v": (packed & TILE_FLIP_V_BIT) != 0,
-		"wall_align": (packed & TILE_WALL_ALIGN_MASK) >> TILE_WALL_ALIGN_SHIFT,
-	}
+	return TilePacking.unpack(packed)
 
 
 # Tile accessors - get raw packed value

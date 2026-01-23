@@ -65,17 +65,26 @@ signal terrain_changed
 
 var _mesh_builder: TerrainMeshBuilder
 var _tile_data_texture: ImageTexture
-var _preview_buffer: Dictionary = {}  # "x,z,surface" -> packed_tile_value
+var _preview: TerrainPreview
 var _atlas_array_texture: Texture2DArray
 var _animation_data_texture: ImageTexture
 
 
 func _ready() -> void:
 	_mesh_builder = TerrainMeshBuilder.new()
+	_preview = TerrainPreview.new()
+	_preview.preview_changed.connect(_on_preview_changed)
 	if not terrain_data:
 		terrain_data = TerrainData.new()
 	rebuild_mesh()
 	_update_material()
+
+
+func _on_preview_changed() -> void:
+	_update_tile_data_texture()
+	var mat := material_override as ShaderMaterial
+	if mat and _tile_data_texture:
+		mat.set_shader_parameter("tile_data", _tile_data_texture)
 
 
 func _on_data_changed() -> void:
@@ -134,8 +143,8 @@ func _update_tile_data_texture() -> void:
 				# Check if preview buffer has an override for this cell/surface
 				var key := "%d,%d,%d" % [x, z, surface]
 				var packed: int
-				if _preview_buffer.has(key):
-					packed = _preview_buffer[key]
+				if _preview and _preview.has(key):
+					packed = _preview.get_value(key)
 				else:
 					packed = tiles[surface]
 
@@ -162,8 +171,8 @@ func _update_tile_data_texture() -> void:
 				var fence_surface := 5 + edge  # 5=fence_north, 6=fence_east, 7=fence_south, 8=fence_west
 				var key := "%d,%d,%d" % [x, z, fence_surface + 1]  # Surface enum: FENCE_NORTH=5, etc.
 				var packed: int
-				if _preview_buffer.has(key):
-					packed = _preview_buffer[key]
+				if _preview and _preview.has(key):
+					packed = _preview.get_value(key)
 				else:
 					packed = fence_tiles[edge]
 
@@ -406,29 +415,23 @@ func clear_selection() -> void:
 
 
 func set_tile_previews(previews: Dictionary) -> void:
-	_preview_buffer = previews
-	_update_tile_data_texture()
-	var mat := material_override as ShaderMaterial
-	if mat and _tile_data_texture:
-		mat.set_shader_parameter("tile_data", _tile_data_texture)
+	if not _preview:
+		_preview = TerrainPreview.new()
+		_preview.preview_changed.connect(_on_preview_changed)
+	_preview.set_previews(previews)
 
 
 func get_preview_buffer() -> Dictionary:
-	return _preview_buffer
+	return _preview.get_buffer() if _preview else {}
 
 
 func clear_preview() -> void:
-	if _preview_buffer.is_empty():
-		return
-	_preview_buffer.clear()
-	_update_tile_data_texture()
-	var mat := material_override as ShaderMaterial
-	if mat and _tile_data_texture:
-		mat.set_shader_parameter("tile_data", _tile_data_texture)
+	if _preview:
+		_preview.clear()
 
 
 func has_preview() -> bool:
-	return not _preview_buffer.is_empty()
+	return _preview and not _preview.is_empty()
 
 
 # Helper to convert world position to nearest corner
