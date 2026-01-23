@@ -20,7 +20,8 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Fence tool** - create vertical fences that extend upward from tile edges with independent corner heights
 - **Adjustable brush size** - 1x1 to 9x9 brush for all terrain tools
 - **Batched updates** - efficient mesh rebuilding for large brush operations
-- **Visual feedback** - overlay-based selection highlight and sidebar status display
+- **Visual feedback** - overlay-based selection highlight
+- **Viewport overlay UI** - compact toolbar in 3D viewport with icon-based tool buttons, resizable paint panel
 
 ## Architecture
 
@@ -91,8 +92,9 @@ addons/landscape/
 ├── editor/
 │   ├── terrain_editor.gd           # Tool coordination, raycasting, input handling
 │   ├── terrain_inspector_plugin.gd # Inspector plugin for undo/redo
-│   ├── terrain_dock.gd             # UI panel script
-│   └── terrain_dock.tscn           # UI panel scene
+│   ├── terrain_overlay_ui.gd       # Viewport overlay UI script
+│   ├── terrain_overlay_ui.tscn     # Viewport overlay UI scene
+│   └── tile_palette.gd             # Tile palette canvas with pan/zoom
 │
 ├── mesh/
 │   └── terrain_mesh_builder.gd     # Procedural mesh generation with SurfaceTool
@@ -185,7 +187,7 @@ PBR shader with atlas-based tile texturing:
 
 1. Enable plugin: Project > Project Settings > Plugins > Enable "Landscape"
 2. Add a `LandscapeTerrain` node to your scene
-3. Select the node to see the editor dock
+3. Select the node to see the toolbar overlay in the bottom-right of the 3D viewport
 4. Use the **Sculpt** tool:
    - Click and drag **near center** to raise/lower entire cell
    - Click and drag **near a corner** to adjust individual corners (creates slopes)
@@ -199,22 +201,21 @@ PBR shader with atlas-based tile texturing:
    - Heights cannot go below 0
 5. Use the **Paint** tool:
    - Click "Generate Placeholder Tiles" to create a test tileset
-   - Select a tile from the palette
+   - Select a tile from the palette in the paint panel (appears when Paint tool is selected)
    - Click any surface (top, north, south, east, west) to paint
-   - Use rotation buttons (↺ ↻) or keyboard shortcuts to transform tiles:
+   - Use rotation button (↻) or keyboard shortcuts to transform tiles:
      - **Z**: Rotate clockwise
-     - **Shift+Z**: Rotate counter-clockwise
      - **X**: Flip horizontal
      - **Y**: Flip vertical
    - **Right-click** on a painted cell to pick its tile (eyedropper)
    - **Hold Shift** while painting to lock to one surface type (e.g., only paint north walls)
-   - Enable **Random mode** (Rnd button) to paint tiles with random rotation and flipping
-   - Use **Wall alignment** dropdown to control how tiles are positioned on walls:
-     - **World**: Tiles align based on world Y position (seamless tiling across walls at same height)
-     - **Top**: Tiles anchored at wall top edge (follows slope, may cut off at bottom)
-     - **Bottom**: Tiles anchored at wall bottom edge (follows slope, may cut off at top)
+   - Enable **Random mode** (dice icon) to paint tiles with random rotation and flipping
+   - Click **Wall alignment** button to cycle through modes:
+     - **World** (full rect icon): Tiles align based on world Y position (seamless tiling)
+     - **Top** (top align icon): Tiles anchored at wall top edge
+     - **Bottom** (bottom align icon): Tiles anchored at wall bottom edge
    - Tile preview shows exactly how the painted result will look (including on walls)
-   - Status bar shows which surface is being hovered
+   - Drag the resize handle at the top of the paint panel to adjust tile palette size
 6. Use the **Flip** tool:
    - Click a cell to toggle its diagonal triangulation
    - Useful for saddle-shaped cells where opposite corners are at different heights
@@ -238,10 +239,9 @@ PBR shader with atlas-based tile texturing:
    - Fences can be edited from either side of the edge
    - Paint fences using the Paint tool (same as walls: rotation, flip, wall alignment)
 10. Adjust **Brush Size**:
-   - Use the slider below the tool buttons (1-9)
+   - Use the slider below the tool icons (1-9)
    - Affects all terrain tools (Sculpt, Paint, Flip, Flatten, Mountain)
    - Larger brushes edit multiple cells at once
-11. View cell info in the sidebar dock (updates on hover and drag)
 
 ## Current Status
 
@@ -276,6 +276,7 @@ PBR shader with atlas-based tile texturing:
 - [x] Wall tile alignment modes (World/Top/Bottom) for controlling vertical tile positioning on walls
 - [x] Fence tool - create vertical fences extending upward from tile edges with independent corner heights
 - [x] Floor sculpting - edit floor surfaces with full constraint system (floor ≤ top, heights ≥ 0)
+- [x] Viewport overlay UI - toolbar in 3D viewport with icon-based tools, resizable paint panel
 
 ### Not Yet Implemented
 - [ ] Multi-cell selection

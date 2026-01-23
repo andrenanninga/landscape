@@ -1,0 +1,201 @@
+[gd_scene load_steps=5 format=3 uid="uid://ciicilx1bom20"]
+
+[ext_resource type="Script" path="res://addons/landscape/editor/terrain_overlay_ui.gd" id="1_overlay"]
+[ext_resource type="Script" path="res://addons/landscape/editor/tile_palette.gd" id="2_palette"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bg"]
+bg_color = Color(0.1, 0.1, 0.1, 0.85)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_handle"]
+bg_color = Color(0.3, 0.3, 0.3, 0.8)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+
+[node name="TerrainOverlayUI" type="Control"]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -460.0
+offset_top = -600.0
+offset_right = -12.0
+offset_bottom = -8.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+script = ExtResource("1_overlay")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="PaintPanel" type="PanelContainer" parent="VBoxContainer"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
+
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/PaintPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="VBoxContainer" type="VBoxContainer" parent="VBoxContainer/PaintPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ResizeHandle" type="Panel" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+mouse_default_cursor_shape = 9
+theme_override_styles/panel = SubResource("StyleBoxFlat_handle")
+
+[node name="TransformRow" type="HBoxContainer" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="WallAlignButton" type="Button" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+tooltip_text = "Wall alignment: World"
+
+[node name="VSeparator1" type="VSeparator" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
+layout_mode = 2
+
+[node name="RotateCWButton" type="Button" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+tooltip_text = "Rotate Clockwise (Z)"
+
+[node name="FlipHButton" type="Button" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Flip Horizontal (X)"
+
+[node name="FlipVButton" type="Button" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Flip Vertical (Y)"
+
+[node name="VSeparator2" type="VSeparator" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
+layout_mode = 2
+
+[node name="RandomButton" type="Button" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Random mode: each tile gets random rotation and flipping"
+
+[node name="AtlasRow" type="HBoxContainer" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AtlasLabel" type="Label" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/AtlasRow"]
+layout_mode = 2
+text = "Atlas:"
+
+[node name="AtlasSelector" type="OptionButton" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer/AtlasRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Select atlas source"
+
+[node name="TilePalette" type="Control" parent="VBoxContainer/PaintPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 300)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("2_palette")
+
+[node name="MainToolbar" type="PanelContainer" parent="VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
+
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/MainToolbar"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="VBoxContainer" type="VBoxContainer" parent="VBoxContainer/MainToolbar/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ToolsRow" type="HBoxContainer" parent="VBoxContainer/MainToolbar/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SculptButton" type="Button" parent="VBoxContainer/MainToolbar/MarginContainer/VBoxContainer/ToolsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+toggle_mode = true
+
+[node name="PaintButton" type="Button" parent="VBoxContainer/MainToolbar/MarginContainer/VBoxContainer/ToolsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+toggle_mode = true
+
+[node name="FlipButton" type="Button" parent="VBoxContainer/MainToolbar/MarginContainer/VBoxContainer/ToolsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+toggle_mode = true
+
+[node name="FlattenButton" type="Button" parent="VBoxContainer/MainToolbar/MarginContainer/VBoxContainer/ToolsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+toggle_mode = true
+
+[node name="MountainButton" type="Button" parent="VBoxContainer/MainToolbar/MarginContainer/VBoxContainer/ToolsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+toggle_mode = true
+
+[node name="FenceButton" type="Button" parent="VBoxContainer/MainToolbar/MarginContainer/VBoxContainer/ToolsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+toggle_mode = true
+
+[node name="BrushSizeSlider" type="HSlider" parent="VBoxContainer/MainToolbar/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 1.0
+max_value = 9.0
+step = 1.0
+value = 1.0
+tooltip_text = "Brush size"

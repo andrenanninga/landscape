@@ -18,6 +18,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Viewport overlay UI** - Moved editor controls from dock to 3D viewport overlay in bottom-right corner. Icon-based tool buttons, resizable paint panel with drag handle, native Godot editor icons for transform controls.
 - [x] **Floor sculpting** - Edit floor surfaces with improved constraints: floor can match top (flat surfaces), lowering top pushes floor down, minimum height of 0. Cell mode floor editing when viewing from below.
 - [x] **Fence tool** - Create vertical fences extending upward from tile edges with independent corner heights, double-sided geometry, editable from either side
 - [x] **Wall tile alignment modes** - Per-tile setting controlling vertical positioning on walls (World/Top/Bottom), follows sloped edges
@@ -235,6 +236,22 @@
   - Each physical edge can only have one fence (auto-clears conflicting neighbor fence)
   - Paint tool extended to support fence surfaces
   - Full undo/redo support for fence create, modify, and delete
+
+### 2025-01-23 - Viewport Overlay UI
+- Moved editor controls from right dock to 3D viewport overlay:
+  - Toolbar anchored to bottom-right of viewport
+  - Icon-based tool buttons (56x56 with large icons)
+  - Brush size slider below tool icons
+  - Semi-transparent dark background with rounded corners
+- Paint panel improvements:
+  - Flyout panel appears above toolbar when Paint tool selected
+  - Resizable via drag handle at top (100-800px height)
+  - Transform controls with native Godot editor icons (RotateRight, MirrorX, MirrorY, RandomNumberGenerator)
+  - Wall alignment as cycling button with icons (ControlAlignFullRect, ControlAlignTopWide, ControlAlignBottomWide)
+  - Removed status labels and redundant controls for cleaner UI
+- Plugin changes:
+  - Uses `_forward_3d_draw_over_viewport` callback to attach overlay to viewport
+  - Overlay visibility controlled by terrain selection state
 
 ### 2025-01-22 - Floor Sculpting
 - Improved floor editing constraints:
