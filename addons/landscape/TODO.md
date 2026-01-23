@@ -18,6 +18,9 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Erase tool** - Toggle erase mode in paint panel to make faces invisible while keeping mesh geometry. Uses special tile index (65535) that shader discards.
+- [x] **Transparent tile support** - Added alpha blending to terrain shader. Tiles with transparency render correctly using `render_mode blend_mix, depth_prepass_alpha`.
+- [x] **Improved paint panel resizing** - Triangle drag handle in top-left corner, resize in both directions (width and height), shift+click on paint button to reset to default size (800x700).
 - [x] **Viewport overlay UI** - Moved editor controls from dock to 3D viewport overlay in bottom-right corner. Icon-based tool buttons, resizable paint panel with drag handle, native Godot editor icons for transform controls.
 - [x] **Floor sculpting** - Edit floor surfaces with improved constraints: floor can match top (flat surfaces), lowering top pushes floor down, minimum height of 0. Cell mode floor editing when viewing from below.
 - [x] **Fence tool** - Create vertical fences extending upward from tile edges with independent corner heights, double-sided geometry, editable from either side
@@ -252,6 +255,24 @@
 - Plugin changes:
   - Uses `_forward_3d_draw_over_viewport` callback to attach overlay to viewport
   - Overlay visibility controlled by terrain selection state
+
+### 2025-01-23 - Erase Tool & Transparency
+- Added transparent tile support:
+  - Added `render_mode blend_mix, depth_prepass_alpha` to terrain shader
+  - Set `ALPHA = albedo.a` to use texture alpha channel
+- Implemented erase tool:
+  - New "Erase" toggle button in paint panel (uses Eraser icon)
+  - Special tile index (65535/0xFFFF) marks faces as invisible
+  - Shader uses `discard` to skip rendering erased faces
+  - Mesh geometry preserved, only rendering is hidden
+- Improved paint panel resizing:
+  - Triangle drag handle in top-left corner
+  - Resize in both directions (width and height)
+  - No maximum size constraints
+  - Shift+click on Paint tool button to reset to default size (800x700)
+- UI reorganization:
+  - Moved atlas selector to transform row (removed separate row)
+  - Erase button at start of transform row with divider
 
 ### 2025-01-22 - Floor Sculpting
 - Improved floor editing constraints:

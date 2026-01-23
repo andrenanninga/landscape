@@ -22,19 +22,21 @@ var terrain = null:
 		_update_tile_palette()
 
 var _tool_buttons: Dictionary = {}
-var _is_resizing: bool = false
-var _resize_start_y: float = 0.0
-var _resize_start_height: float = 0.0
+var _panel_size := Vector2(800.0, 700.0)
+var _is_dragging_resize := false
+var _resize_drag_start := Vector2.ZERO
+var _resize_size_start := Vector2.ZERO
 
-const MIN_PALETTE_HEIGHT := 100.0
-const MAX_PALETTE_HEIGHT := 800.0
+const MIN_PANEL_WIDTH := 250.0
+const MIN_PANEL_HEIGHT := 150.0
+const DEFAULT_PANEL_SIZE := Vector2(800.0, 700.0)
 
 @onready var _main_toolbar: PanelContainer = %MainToolbar
 @onready var _paint_panel: PanelContainer = %PaintPanel
 @onready var _brush_size_slider: HSlider = %BrushSizeSlider
-@onready var _resize_handle: Panel = %ResizeHandle
-@onready var _atlas_row: HBoxContainer = %AtlasRow
+@onready var _resize_handle: Control = %ResizeHandle
 @onready var _atlas_selector: OptionButton = %AtlasSelector
+@onready var _erase_button: Button = %EraseButton
 @onready var _wall_align_button: Button = %WallAlignButton
 @onready var _rotate_cw_button: Button = %RotateCWButton
 @onready var _flip_h_button: Button = %FlipHButton
@@ -58,30 +60,47 @@ func _ready() -> void:
 		_tile_palette.tile_selected.connect(_on_tile_selected)
 
 
+func _process(_delta: float) -> void:
+	_update_paint_panel()
+
+
 func _setup_resize_handle() -> void:
 	if _resize_handle:
+		_resize_handle.draw.connect(_on_resize_handle_draw)
 		_resize_handle.gui_input.connect(_on_resize_handle_input)
+		_resize_handle.queue_redraw()
+
+
+func _on_resize_handle_draw() -> void:
+	if not _resize_handle:
+		return
+	var s := _resize_handle.size
+	var points := PackedVector2Array([Vector2(0, 0), Vector2(s.x, 0), Vector2(0, s.y)])
+	_resize_handle.draw_polygon(points, [Color(0.5, 0.5, 0.5, 0.8)])
 
 
 func _on_resize_handle_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT:
-			if mb.pressed:
-				_is_resizing = true
-				_resize_start_y = mb.global_position.y
-				_resize_start_height = _tile_palette.custom_minimum_size.y if _tile_palette else 200.0
-			else:
-				_is_resizing = false
+		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+			_is_dragging_resize = true
+			_resize_drag_start = mb.global_position
+			_resize_size_start = _panel_size
 			_resize_handle.accept_event()
 
-	elif event is InputEventMouseMotion and _is_resizing:
+
+func _input(event: InputEvent) -> void:
+	if not _is_dragging_resize:
+		return
+	if event is InputEventMouseMotion:
 		var motion := event as InputEventMouseMotion
-		var delta := _resize_start_y - motion.global_position.y
-		var new_height := clampf(_resize_start_height + delta, MIN_PALETTE_HEIGHT, MAX_PALETTE_HEIGHT)
-		if _tile_palette:
-			_tile_palette.custom_minimum_size.y = new_height
-		_resize_handle.accept_event()
+		var delta := _resize_drag_start - motion.global_position
+		_panel_size.x = maxf(_resize_size_start.x + delta.x, MIN_PANEL_WIDTH)
+		_panel_size.y = maxf(_resize_size_start.y + delta.y, MIN_PANEL_HEIGHT)
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+			_is_dragging_resize = false
 
 
 func _setup_tool_buttons() -> void:
@@ -120,6 +139,9 @@ func _setup_tool_buttons() -> void:
 			button.expand_icon = true
 			button.add_theme_constant_override("icon_max_width", 48)
 			button.pressed.connect(_on_tool_button_pressed.bind(tool_type))
+			# Add shift+click to reset paint panel size
+			if tool_type == TerrainEditor.Tool.PAINT:
+				button.gui_input.connect(_on_paint_button_input)
 
 
 func _setup_brush_controls() -> void:
@@ -146,6 +168,10 @@ func _update_brush_size_display() -> void:
 
 func _setup_paint_controls() -> void:
 	# Set editor icons using theme from this control
+	if _erase_button:
+		_erase_button.icon = get_theme_icon("Eraser", "EditorIcons")
+		_erase_button.toggled.connect(_on_erase_toggled)
+
 	# Cache wall align icons
 	_wall_align_icons = [
 		get_theme_icon("ControlAlignFullRect", "EditorIcons"),  # World
@@ -186,6 +212,13 @@ func _on_tool_button_pressed(tool: TerrainEditor.Tool) -> void:
 	_update_button_states()
 
 
+func _on_paint_button_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and mb.shift_pressed:
+			_panel_size = DEFAULT_PANEL_SIZE
+
+
 func _on_tool_changed(tool: TerrainEditor.Tool) -> void:
 	_update_button_states()
 	_update_paint_panel_visibility()
@@ -221,6 +254,11 @@ func _on_random_toggled(pressed: bool) -> void:
 		terrain_editor.current_paint_random = pressed
 
 
+func _on_erase_toggled(pressed: bool) -> void:
+	if terrain_editor:
+		terrain_editor.current_paint_erase = pressed
+
+
 func _on_wall_align_cycle() -> void:
 	if terrain_editor:
 		var current := terrain_editor.current_paint_wall_align as int
@@ -238,11 +276,33 @@ func _update_paint_panel_visibility() -> void:
 	var is_paint_mode: bool = terrain_editor != null and terrain_editor.current_tool == TerrainEditor.Tool.PAINT
 	if _paint_panel:
 		_paint_panel.visible = is_paint_mode
+	if _resize_handle:
+		_resize_handle.visible = is_paint_mode
+
+
+func _update_paint_panel() -> void:
+	if not _paint_panel or not _main_toolbar or not _paint_panel.visible:
+		return
+
+	# Set panel size and position directly
+	var toolbar_rect := _main_toolbar.get_rect()
+	_paint_panel.position = Vector2(
+		toolbar_rect.end.x - _panel_size.x,
+		toolbar_rect.position.y - _panel_size.y - 12
+	)
+	_paint_panel.size = _panel_size
+
+	# Position resize handle at top-left of panel
+	if _resize_handle:
+		_resize_handle.position = _paint_panel.position
 
 
 func _update_paint_controls() -> void:
 	if not terrain_editor:
 		return
+
+	if _erase_button:
+		_erase_button.button_pressed = terrain_editor.current_paint_erase
 
 	if _flip_h_button:
 		_flip_h_button.button_pressed = terrain_editor.current_paint_flip_h
@@ -287,13 +347,13 @@ func _update_tile_palette() -> void:
 
 
 func _update_atlas_selector(tile_set: TerrainTileSet) -> void:
-	if not _atlas_selector or not _atlas_row:
+	if not _atlas_selector:
 		return
 
 	_atlas_selector.clear()
 
 	if not tile_set:
-		_atlas_row.visible = false
+		_atlas_selector.visible = false
 		return
 
 	var atlas_count := tile_set.get_atlas_count()
@@ -302,8 +362,8 @@ func _update_atlas_selector(tile_set: TerrainTileSet) -> void:
 		var label := "Atlas %d" % i
 		_atlas_selector.add_item(label, i)
 
-	# Show atlas row (even with one atlas, so user knows which one is active)
-	_atlas_row.visible = atlas_count > 0
+	# Show selector if there are atlases
+	_atlas_selector.visible = atlas_count > 0
 
 	# Sync with tile palette selection
 	if _tile_palette and _atlas_selector.item_count > 0:

@@ -69,6 +69,13 @@ var current_paint_random: bool = false:
 		if _paint_handler:
 			_paint_handler.update_preview()
 
+var current_paint_erase: bool = false:
+	set(value):
+		current_paint_erase = value
+		paint_state_changed.emit()
+		if _paint_handler:
+			_paint_handler.update_preview()
+
 var current_paint_wall_align: TerrainData.WallAlign = TerrainData.WallAlign.WORLD:
 	set(value):
 		current_paint_wall_align = value

@@ -69,6 +69,7 @@ const FENCE_TILE_OFFSET := 17  # 4 fence tiles (north, east, south, west)
 
 # Bit packing constants - delegated to TilePacking for single source of truth
 const TILE_INDEX_MASK := TilePacking.TILE_INDEX_MASK
+const ERASED_TILE_INDEX := 0xFFFF  # Special value meaning "no tile / invisible"
 const TILE_ROTATION_MASK := TilePacking.TILE_ROTATION_MASK
 const TILE_ROTATION_SHIFT := TilePacking.TILE_ROTATION_SHIFT
 const TILE_FLIP_H_BIT := TilePacking.TILE_FLIP_H_BIT

@@ -1,4 +1,5 @@
 shader_type spatial;
+render_mode blend_mix, depth_prepass_alpha;
 // PBR rendering - works with Godot's lighting and environment
 
 // Tile atlas array texture (multiple atlas sources)
@@ -261,12 +262,19 @@ void fragment() {
 	// Apply rotation and flip transformations
 	local_uv = transform_uv(local_uv, rotation, flip_h, flip_v);
 
+	// Check for erased tile (atlas_id = 255 and coords = 255, 255)
+	bool is_erased = atlas_id == 255 && tile_x == 255 && tile_y == 255;
+	if (is_erased) {
+		discard;
+	}
+
 	// Convert to atlas UV and sample from the atlas array
 	vec2 atlas_uv = get_atlas_uv(tile_x, tile_y, atlas_id, local_uv);
 	vec4 albedo = texture(tile_atlas_array, vec3(atlas_uv, float(atlas_id)));
 
 	// Set PBR outputs
 	ALBEDO = albedo.rgb;
+	ALPHA = albedo.a;
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
 

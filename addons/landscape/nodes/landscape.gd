@@ -154,9 +154,15 @@ func _update_tile_data_texture() -> void:
 				var flip_v := 1 if (packed & TerrainData.TILE_FLIP_V_BIT) != 0 else 0
 				var wall_align := (packed & TerrainData.TILE_WALL_ALIGN_MASK) >> TerrainData.TILE_WALL_ALIGN_SHIFT
 
-				# Get atlas ID and actual atlas coordinates
-				var atlas_id := tile_set.get_atlas_for_tile(global_tile_index)
-				var atlas_coords := tile_set.get_tile_atlas_coords_global(global_tile_index)
+				# Check for erased tile (special invisible marker)
+				var atlas_id: int
+				var atlas_coords: Vector2i
+				if global_tile_index == TerrainData.ERASED_TILE_INDEX:
+					atlas_id = 255  # Special marker for erased
+					atlas_coords = Vector2i(255, 255)
+				else:
+					atlas_id = tile_set.get_atlas_for_tile(global_tile_index)
+					atlas_coords = tile_set.get_tile_atlas_coords_global(global_tile_index)
 
 				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v, bits 4-5 = wall_align
 				var flags := rotation | (flip_h << 2) | (flip_v << 3) | (wall_align << 4)
@@ -182,9 +188,15 @@ func _update_tile_data_texture() -> void:
 				var flip_v := 1 if (packed & TerrainData.TILE_FLIP_V_BIT) != 0 else 0
 				var wall_align := (packed & TerrainData.TILE_WALL_ALIGN_MASK) >> TerrainData.TILE_WALL_ALIGN_SHIFT
 
-				# Get atlas ID and actual atlas coordinates
-				var atlas_id := tile_set.get_atlas_for_tile(global_tile_index)
-				var atlas_coords := tile_set.get_tile_atlas_coords_global(global_tile_index)
+				# Check for erased tile (special invisible marker)
+				var atlas_id: int
+				var atlas_coords: Vector2i
+				if global_tile_index == TerrainData.ERASED_TILE_INDEX:
+					atlas_id = 255  # Special marker for erased
+					atlas_coords = Vector2i(255, 255)
+				else:
+					atlas_id = tile_set.get_atlas_for_tile(global_tile_index)
+					atlas_coords = tile_set.get_tile_atlas_coords_global(global_tile_index)
 
 				# Pack flags: bits 0-1 = rotation, bit 2 = flip_h, bit 3 = flip_v, bits 4-5 = wall_align
 				var flags := rotation | (flip_h << 2) | (flip_v << 3) | (wall_align << 4)

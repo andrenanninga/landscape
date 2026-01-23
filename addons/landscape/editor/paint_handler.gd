@@ -157,6 +157,10 @@ func _build_paint_preview(data: TerrainData, center: Vector2i, surface: TerrainD
 
 
 func _get_paint_packed(cell: Vector2i, surface: TerrainData.Surface) -> int:
+	# Erase mode: return special "no tile" value
+	if _editor.current_paint_erase:
+		return TerrainData.ERASED_TILE_INDEX
+
 	if _editor.current_paint_random:
 		# Use cell position and surface as seed for deterministic randomness
 		# This ensures the same cell shows the same random transform during hover

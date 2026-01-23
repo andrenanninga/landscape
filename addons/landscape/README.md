@@ -14,6 +14,8 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Floor sculpting** - edit floor surfaces by clicking below midpoint or viewing from below
 - **Smart corner detection** - automatically detects cell vs corner mode based on cursor position
 - **Paint tool** - paint tiles on any surface (top, north, south, east, west) with rotation/flip
+- **Erase tool** - make faces invisible while keeping the mesh geometry
+- **Transparent tile support** - tiles with alpha transparency render correctly
 - **Flip diagonal tool** - toggle triangle diagonal direction for saddle-shaped terrain
 - **Flatten tool** - drag to flatten terrain to a target height
 - **Mountain tool** - create hills and valleys with smooth sloped edges
@@ -207,6 +209,7 @@ PBR shader with atlas-based tile texturing:
      - **Z**: Rotate clockwise
      - **X**: Flip horizontal
      - **Y**: Flip vertical
+   - **Erase mode** (eraser icon): Toggle to make faces invisible instead of painting tiles
    - **Right-click** on a painted cell to pick its tile (eyedropper)
    - **Hold Shift** while painting to lock to one surface type (e.g., only paint north walls)
    - Enable **Random mode** (dice icon) to paint tiles with random rotation and flipping
@@ -215,7 +218,8 @@ PBR shader with atlas-based tile texturing:
      - **Top** (top align icon): Tiles anchored at wall top edge
      - **Bottom** (bottom align icon): Tiles anchored at wall bottom edge
    - Tile preview shows exactly how the painted result will look (including on walls)
-   - Drag the resize handle at the top of the paint panel to adjust tile palette size
+   - Drag the triangle handle at top-left of the paint panel to resize in both directions
+   - **Shift+click** the Paint tool button to reset panel size to default
 6. Use the **Flip** tool:
    - Click a cell to toggle its diagonal triangulation
    - Useful for saddle-shaped cells where opposite corners are at different heights
@@ -277,6 +281,8 @@ PBR shader with atlas-based tile texturing:
 - [x] Fence tool - create vertical fences extending upward from tile edges with independent corner heights
 - [x] Floor sculpting - edit floor surfaces with full constraint system (floor ≤ top, heights ≥ 0)
 - [x] Viewport overlay UI - toolbar in 3D viewport with icon-based tools, resizable paint panel
+- [x] Transparent tile support - tiles with alpha channel render correctly
+- [x] Erase tool - make faces invisible while keeping mesh geometry
 
 ### Not Yet Implemented
 - [ ] Multi-cell selection
