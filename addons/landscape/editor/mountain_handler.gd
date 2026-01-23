@@ -158,6 +158,8 @@ func finish_drag() -> void:
 
 	# Create undo/redo action for the final change
 	_editor.undo_redo.create_action("Mountain Terrain")
+	_editor.undo_redo.add_do_method(data, "begin_batch")
+	_editor.undo_redo.add_undo_method(data, "begin_batch")
 
 	for cell in _editor._drag_mountain_all_cells:
 		if not _editor._drag_mountain_original_corners.has(cell):
@@ -173,6 +175,8 @@ func finish_drag() -> void:
 			_editor.undo_redo.add_do_method(data, "set_top_corners", cell.x, cell.y, final_corners)
 			_editor.undo_redo.add_undo_method(data, "set_top_corners", cell.x, cell.y, original_typed)
 
+	_editor.undo_redo.add_do_method(data, "end_batch")
+	_editor.undo_redo.add_undo_method(data, "end_batch")
 	_editor.undo_redo.commit_action(false)  # Don't execute, already applied
 
 	_editor._is_dragging = false
@@ -248,10 +252,10 @@ func _apply_mountain_heights(data: TerrainData, delta: int) -> void:
 			])
 		else:
 			data.set_top_corners(cx, cy, [
-				mini(o0, peak_height + d0 * max_slope),
-				mini(o1, peak_height + d1 * max_slope),
-				mini(o2, peak_height + d2 * max_slope),
-				mini(o3, peak_height + d3 * max_slope),
+				maxi(mini(o0, peak_height + d0 * max_slope), 0),
+				maxi(mini(o1, peak_height + d1 * max_slope), 0),
+				maxi(mini(o2, peak_height + d2 * max_slope), 0),
+				maxi(mini(o3, peak_height + d3 * max_slope), 0),
 			])
 
 	data.end_batch()
