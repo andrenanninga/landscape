@@ -15,6 +15,7 @@ A grid-based terrain editor plugin for Godot 4.5 with discrete height steps, sim
 - **Smart corner detection** - automatically detects cell vs corner mode based on cursor position
 - **Paint tool** - paint tiles on any surface (top, north, south, east, west) with rotation/flip
 - **Erase tool** - make faces invisible while keeping the mesh geometry
+- **Vertex color tool** - paint vertex colors on terrain corners with optional light mode (distance-based falloff with blend modes)
 - **Transparent tile support** - tiles with alpha transparency render correctly
 - **Flip diagonal tool** - toggle triangle diagonal direction for saddle-shaped terrain
 - **Flatten tool** - drag to flatten terrain to a target height
@@ -283,6 +284,8 @@ PBR shader with atlas-based tile texturing:
 - [x] Viewport overlay UI - toolbar in 3D viewport with icon-based tools, resizable paint panel
 - [x] Transparent tile support - tiles with alpha channel render correctly
 - [x] Erase tool - make faces invisible while keeping mesh geometry
+- [x] Vertex color tool - paint vertex colors on corners with brush support
+- [x] Light mode for vertex colors - distance-based falloff with selectable blend modes (Screen, Additive, Overlay, Multiply)
 
 ### Not Yet Implemented
 - [ ] Multi-cell selection

@@ -42,13 +42,17 @@ varying vec3 local_position;
 varying flat int surface_type;
 varying vec2 wall_bounds;  // UV2: x = wall top Y, y = wall bottom Y (for wall alignment)
 
+varying vec3 vertex_color;
+
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	local_position = VERTEX;
-	// Decode surface type from vertex color (R channel: 0-9 normalized to 0-1)
+	// Decode surface type from vertex color alpha channel (0-9 normalized to 0-1)
 	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor,
 	// 6=fence_north, 7=fence_east, 8=fence_south, 9=fence_west
-	surface_type = int(round(COLOR.r * 9.0));
+	surface_type = int(round(COLOR.a * 9.0));
+	// Vertex color RGB for tinting
+	vertex_color = COLOR.rgb;
 	// Pass wall bounds from UV2 (used for wall alignment calculations)
 	wall_bounds = UV2;
 }
@@ -272,8 +276,8 @@ void fragment() {
 	vec2 atlas_uv = get_atlas_uv(tile_x, tile_y, atlas_id, local_uv);
 	vec4 albedo = texture(tile_atlas_array, vec3(atlas_uv, float(atlas_id)));
 
-	// Set PBR outputs
-	ALBEDO = albedo.rgb;
+	// Set PBR outputs - apply vertex color tint
+	ALBEDO = albedo.rgb * vertex_color;
 	ALPHA = albedo.a;
 	ROUGHNESS = roughness;
 	METALLIC = metallic;

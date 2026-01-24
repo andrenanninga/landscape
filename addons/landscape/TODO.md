@@ -18,6 +18,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Vertex color light mode** - Added light source mode to vertex color tool. Center of brush gets full intensity, edges fade with quadratic falloff. Selectable blend modes: Screen (soft lights), Additive (bright glows), Overlay (contrast-preserving), Multiply (shadows/darkening). Light mode disables erase mode.
 - [x] **Erase tool** - Toggle erase mode in paint panel to make faces invisible while keeping mesh geometry. Uses special tile index (65535) that shader discards.
 - [x] **Transparent tile support** - Added alpha blending to terrain shader. Tiles with transparency render correctly using `render_mode blend_mix, depth_prepass_alpha`.
 - [x] **Improved paint panel resizing** - Triangle drag handle in top-left corner, resize in both directions (width and height), shift+click on paint button to reset to default size (800x700).

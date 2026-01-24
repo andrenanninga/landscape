@@ -111,6 +111,60 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 script = ExtResource("2_palette")
 
+[node name="ColorPanel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
+
+[node name="MarginContainer" type="MarginContainer" parent="ColorPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="VBoxContainer" type="VBoxContainer" parent="ColorPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ToolRow" type="HBoxContainer" parent="ColorPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ColorEraseButton" type="Button" parent="ColorPanel/MarginContainer/VBoxContainer/ToolRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Erase mode: reset vertex colors to white"
+
+[node name="VSeparator" type="VSeparator" parent="ColorPanel/MarginContainer/VBoxContainer/ToolRow"]
+layout_mode = 2
+
+[node name="ColorLightModeButton" type="Button" parent="ColorPanel/MarginContainer/VBoxContainer/ToolRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "Light mode: apply color with distance falloff"
+
+[node name="ColorBlendModeSelector" type="OptionButton" parent="ColorPanel/MarginContainer/VBoxContainer/ToolRow"]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+tooltip_text = "Blend mode for light falloff"
+
+[node name="ColorPicker" type="ColorPicker" parent="ColorPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+color = Color(1, 1, 1, 1)
+edit_alpha = false
+sampler_visible = false
+sliders_visible = false
+hex_visible = false
+presets_visible = true
+
 [node name="MainToolbar" type="PanelContainer" parent="."]
 unique_name_in_owner = true
 layout_mode = 0
@@ -145,6 +199,12 @@ layout_mode = 2
 toggle_mode = true
 
 [node name="PaintButton" type="Button" parent="MainToolbar/MarginContainer/VBoxContainer/ToolsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+toggle_mode = true
+
+[node name="ColorButton" type="Button" parent="MainToolbar/MarginContainer/VBoxContainer/ToolsRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(56, 56)
 layout_mode = 2

@@ -3,6 +3,7 @@ extends Control
 
 const SculptIcon = preload("res://addons/landscape/icons/sculpt_tool.svg")
 const PaintIcon = preload("res://addons/landscape/icons/paint_tool.svg")
+const ColorIcon = preload("res://addons/landscape/icons/color_tool.svg")
 const FlipIcon = preload("res://addons/landscape/icons/flip_tool.svg")
 const FlattenIcon = preload("res://addons/landscape/icons/flatten_tool.svg")
 const MountainIcon = preload("res://addons/landscape/icons/mountain_tool.svg")
@@ -15,6 +16,7 @@ var terrain_editor = null:
 			terrain_editor.tool_changed.connect(_on_tool_changed)
 			terrain_editor.paint_state_changed.connect(_on_paint_state_changed)
 			terrain_editor.brush_size_changed.connect(_on_brush_size_changed)
+			terrain_editor.vertex_color_changed.connect(_on_vertex_color_changed)
 
 var terrain = null:
 	set(value):
@@ -33,6 +35,7 @@ const DEFAULT_PANEL_SIZE := Vector2(800.0, 700.0)
 
 @onready var _main_toolbar: PanelContainer = %MainToolbar
 @onready var _paint_panel: PanelContainer = %PaintPanel
+@onready var _color_panel: PanelContainer = %ColorPanel
 @onready var _brush_size_slider: HSlider = %BrushSizeSlider
 @onready var _resize_handle: Control = %ResizeHandle
 @onready var _atlas_selector: OptionButton = %AtlasSelector
@@ -43,6 +46,10 @@ const DEFAULT_PANEL_SIZE := Vector2(800.0, 700.0)
 @onready var _flip_v_button: Button = %FlipVButton
 @onready var _random_button: Button = %RandomButton
 @onready var _tile_palette: TilePalette = %TilePalette
+@onready var _color_picker: ColorPicker = %ColorPicker
+@onready var _color_erase_button: Button = %ColorEraseButton
+@onready var _color_light_mode_button: Button = %ColorLightModeButton
+@onready var _color_blend_mode_selector: OptionButton = %ColorBlendModeSelector
 
 var _wall_align_icons: Array[Texture2D] = []
 const WALL_ALIGN_TOOLTIPS: Array[String] = ["Wall alignment: World", "Wall alignment: Top", "Wall alignment: Bottom"]
@@ -52,9 +59,11 @@ func _ready() -> void:
 	_setup_tool_buttons()
 	_setup_brush_controls()
 	_setup_paint_controls()
+	_setup_color_controls()
 	_setup_resize_handle()
 	_update_button_states()
 	_update_paint_panel_visibility()
+	_update_color_panel_visibility()
 
 	if _tile_palette:
 		_tile_palette.tile_selected.connect(_on_tile_selected)
@@ -62,6 +71,7 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_update_paint_panel()
+	_update_color_panel()
 
 
 func _setup_resize_handle() -> void:
@@ -107,6 +117,7 @@ func _setup_tool_buttons() -> void:
 	_tool_buttons = {
 		TerrainEditor.Tool.SCULPT: %SculptButton,
 		TerrainEditor.Tool.PAINT: %PaintButton,
+		TerrainEditor.Tool.COLOR: %ColorButton,
 		TerrainEditor.Tool.FLIP_DIAGONAL: %FlipButton,
 		TerrainEditor.Tool.FLATTEN: %FlattenButton,
 		TerrainEditor.Tool.MOUNTAIN: %MountainButton,
@@ -116,6 +127,7 @@ func _setup_tool_buttons() -> void:
 	var icons: Dictionary = {
 		TerrainEditor.Tool.SCULPT: SculptIcon,
 		TerrainEditor.Tool.PAINT: PaintIcon,
+		TerrainEditor.Tool.COLOR: ColorIcon,
 		TerrainEditor.Tool.FLIP_DIAGONAL: FlipIcon,
 		TerrainEditor.Tool.FLATTEN: FlattenIcon,
 		TerrainEditor.Tool.MOUNTAIN: MountainIcon,
@@ -125,6 +137,7 @@ func _setup_tool_buttons() -> void:
 	var tooltips: Dictionary = {
 		TerrainEditor.Tool.SCULPT: "Sculpt - Drag to raise/lower terrain",
 		TerrainEditor.Tool.PAINT: "Paint - Click to paint tiles",
+		TerrainEditor.Tool.COLOR: "Color - Paint vertex colors on corners",
 		TerrainEditor.Tool.FLIP_DIAGONAL: "Flip - Toggle cell diagonal",
 		TerrainEditor.Tool.FLATTEN: "Flatten - Level terrain to height",
 		TerrainEditor.Tool.MOUNTAIN: "Mountain - Create hills and valleys",
@@ -203,6 +216,32 @@ func _setup_paint_controls() -> void:
 		_atlas_selector.item_selected.connect(_on_atlas_selected)
 
 
+func _setup_color_controls() -> void:
+	if _color_picker:
+		_color_picker.color = Color.WHITE
+		_color_picker.color_changed.connect(_on_color_picker_changed)
+
+	if _color_erase_button:
+		_color_erase_button.icon = get_theme_icon("Eraser", "EditorIcons")
+		_color_erase_button.toggled.connect(_on_color_erase_toggled)
+
+	if _color_light_mode_button:
+		var icon := get_theme_icon("GizmoLight", "EditorIcons")
+		var img := icon.get_image()
+		img.resize(32, 32)
+		_color_light_mode_button.icon = ImageTexture.create_from_image(img)
+		_color_light_mode_button.toggled.connect(_on_color_light_mode_toggled)
+
+	if _color_blend_mode_selector:
+		_color_blend_mode_selector.clear()
+		_color_blend_mode_selector.add_item("Screen", TerrainEditor.BlendMode.SCREEN)
+		_color_blend_mode_selector.add_item("Additive", TerrainEditor.BlendMode.ADDITIVE)
+		_color_blend_mode_selector.add_item("Overlay", TerrainEditor.BlendMode.OVERLAY)
+		_color_blend_mode_selector.add_item("Multiply", TerrainEditor.BlendMode.MULTIPLY)
+		_color_blend_mode_selector.item_selected.connect(_on_color_blend_mode_selected)
+		_update_blend_mode_visibility()
+
+
 func _on_tool_button_pressed(tool: TerrainEditor.Tool) -> void:
 	if terrain_editor:
 		if terrain_editor.current_tool == tool:
@@ -222,6 +261,7 @@ func _on_paint_button_input(event: InputEvent) -> void:
 func _on_tool_changed(tool: TerrainEditor.Tool) -> void:
 	_update_button_states()
 	_update_paint_panel_visibility()
+	_update_color_panel_visibility()
 
 
 func _on_paint_state_changed() -> void:
@@ -280,6 +320,66 @@ func _update_paint_panel_visibility() -> void:
 		_resize_handle.visible = is_paint_mode
 
 
+func _update_color_panel_visibility() -> void:
+	var is_color_mode: bool = terrain_editor != null and terrain_editor.current_tool == TerrainEditor.Tool.COLOR
+	if _color_panel:
+		_color_panel.visible = is_color_mode
+
+
+func _on_color_picker_changed(color: Color) -> void:
+	if terrain_editor:
+		terrain_editor.current_vertex_color = color
+		# Disable erase mode when a new color is selected
+		terrain_editor.current_vertex_color_erase = false
+
+
+func _on_color_erase_toggled(pressed: bool) -> void:
+	if terrain_editor:
+		terrain_editor.current_vertex_color_erase = pressed
+
+
+func _on_color_light_mode_toggled(pressed: bool) -> void:
+	if terrain_editor:
+		terrain_editor.current_vertex_color_light_mode = pressed
+		if pressed:
+			terrain_editor.current_vertex_color_erase = false
+	_update_blend_mode_visibility()
+
+
+func _on_color_blend_mode_selected(index: int) -> void:
+	if terrain_editor and _color_blend_mode_selector:
+		var blend_mode := _color_blend_mode_selector.get_item_id(index) as TerrainEditor.BlendMode
+		terrain_editor.current_vertex_color_blend_mode = blend_mode
+
+
+func _update_blend_mode_visibility() -> void:
+	if _color_blend_mode_selector and terrain_editor:
+		_color_blend_mode_selector.disabled = not terrain_editor.current_vertex_color_light_mode
+
+
+func _on_vertex_color_changed() -> void:
+	_update_color_controls()
+
+
+func _update_color_controls() -> void:
+	if not terrain_editor:
+		return
+
+	if _color_picker:
+		_color_picker.color = terrain_editor.current_vertex_color
+
+	if _color_erase_button:
+		_color_erase_button.button_pressed = terrain_editor.current_vertex_color_erase
+
+	if _color_light_mode_button:
+		_color_light_mode_button.button_pressed = terrain_editor.current_vertex_color_light_mode
+
+	if _color_blend_mode_selector:
+		_color_blend_mode_selector.selected = terrain_editor.current_vertex_color_blend_mode as int
+
+	_update_blend_mode_visibility()
+
+
 func _update_paint_panel() -> void:
 	if not _paint_panel or not _main_toolbar or not _paint_panel.visible:
 		return
@@ -295,6 +395,19 @@ func _update_paint_panel() -> void:
 	# Position resize handle at top-left of panel
 	if _resize_handle:
 		_resize_handle.position = _paint_panel.position
+
+
+func _update_color_panel() -> void:
+	if not _color_panel or not _main_toolbar or not _color_panel.visible:
+		return
+
+	# Position color panel above the toolbar, aligned to right edge
+	var toolbar_rect := _main_toolbar.get_rect()
+	var panel_size := _color_panel.size
+	_color_panel.position = Vector2(
+		toolbar_rect.end.x - panel_size.x,
+		toolbar_rect.position.y - panel_size.y - 12
+	)
 
 
 func _update_paint_controls() -> void:

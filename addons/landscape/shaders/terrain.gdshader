@@ -57,6 +57,7 @@ uniform float corner_highlight_size : hint_range(0.2, 0.7) = 0.5;
 
 varying vec3 world_position;
 varying vec3 local_position;
+varying vec3 vertex_color;
 
 // Get checkerboard value (0 or 1) based on world position and face direction
 float get_checker(vec3 pos, vec3 normal) {
@@ -119,6 +120,8 @@ void get_direction_colors(vec3 normal, out vec3 primary, out vec3 secondary) {
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	local_position = VERTEX;
+	// Vertex color RGB for tinting (alpha contains surface type, which we don't use in this shader)
+	vertex_color = COLOR.rgb;
 }
 
 void fragment() {
@@ -229,5 +232,6 @@ void fragment() {
 		}
 	}
 
-	ALBEDO = final_color;
+	// Apply vertex color tint
+	ALBEDO = final_color * vertex_color;
 }

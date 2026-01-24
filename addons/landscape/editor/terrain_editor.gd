@@ -2,7 +2,7 @@
 class_name TerrainEditor
 extends RefCounted
 
-enum Tool { NONE, SCULPT, PAINT, FLIP_DIAGONAL, FLATTEN, MOUNTAIN, FENCE }
+enum Tool { NONE, SCULPT, PAINT, COLOR, FLIP_DIAGONAL, FLATTEN, MOUNTAIN, FENCE }
 enum HoverMode { CELL, CORNER, FLOOR_CORNER }
 enum FenceHover { NONE, LEFT_CORNER, RIGHT_CORNER, MIDDLE }
 
@@ -11,6 +11,7 @@ signal hover_changed(cell: Vector2i, corner: int, mode: int)
 signal height_changed(height: float, corner: int, mode: int)
 signal paint_state_changed()
 signal brush_size_changed(new_size: int)
+signal vertex_color_changed()
 
 var editor_interface: EditorInterface
 var undo_redo: EditorUndoRedoManager
@@ -89,6 +90,29 @@ var brush_size: int = 1:
 		brush_size = clampi(value, 1, 9)
 		brush_size_changed.emit(brush_size)
 
+# Vertex color painting state
+var current_vertex_color: Color = Color.WHITE:
+	set(value):
+		current_vertex_color = value
+		vertex_color_changed.emit()
+
+var current_vertex_color_erase: bool = false:
+	set(value):
+		current_vertex_color_erase = value
+		vertex_color_changed.emit()
+
+var current_vertex_color_light_mode: bool = false:
+	set(value):
+		current_vertex_color_light_mode = value
+		vertex_color_changed.emit()
+
+enum BlendMode { SCREEN, ADDITIVE, OVERLAY, MULTIPLY }
+
+var current_vertex_color_blend_mode: BlendMode = BlendMode.SCREEN:
+	set(value):
+		current_vertex_color_blend_mode = value
+		vertex_color_changed.emit()
+
 # Corner detection threshold - distance from corner as fraction of cell size
 const CORNER_THRESHOLD := 0.45
 
@@ -144,6 +168,9 @@ var _paint_locked_surface: TerrainData.Surface = TerrainData.Surface.TOP
 # Right-click picker state
 var _right_click_picking: bool = false
 
+# Vertex color drag state
+var _is_color_dragging: bool = false
+
 # Fence tool state
 var _hovered_fence_edge: int = -1  # 0=N, 1=E, 2=S, 3=W, -1=none
 var _hovered_fence_hover: FenceHover = FenceHover.NONE
@@ -166,12 +193,14 @@ var _paint_handler: PaintHandler
 var _flatten_handler: FlattenHandler
 var _sculpt_handler: SculptHandler
 var _mountain_handler: MountainHandler
+var _color_handler: ColorHandler
 
 
 func _init() -> void:
 	_overlay_handler = TerrainOverlay.new(self)
 	_fence_handler = FenceHandler.new(self)
 	_paint_handler = PaintHandler.new(self)
+	_color_handler = ColorHandler.new(self)
 	_flatten_handler = FlattenHandler.new(self)
 	_sculpt_handler = SculptHandler.new(self)
 	_mountain_handler = MountainHandler.new(self)
@@ -193,6 +222,8 @@ func _cancel_all_drags() -> void:
 		_flatten_handler.cancel_drag()
 	if _is_paint_dragging:
 		_paint_handler.cancel_preview()
+	if _is_color_dragging:
+		_color_handler.cancel_drag()
 	if _is_fence_dragging:
 		_fence_handler.cancel_drag()
 
@@ -341,6 +372,9 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 		elif _is_paint_dragging:
 			_paint_handler.update_drag(camera, motion.position)
 			return true
+		elif _is_color_dragging:
+			_color_handler.update_drag(camera, motion.position)
+			return true
 		elif _is_fence_dragging:
 			_fence_handler.update_drag(camera, motion.position)
 			return true
@@ -369,6 +403,9 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 				elif _is_paint_dragging:
 					_paint_handler.finish_drag()
 					return true
+				elif _is_color_dragging:
+					_color_handler.finish_drag()
+					return true
 				elif _is_fence_dragging:
 					_fence_handler.finish_drag()
 					return true
@@ -385,18 +422,24 @@ func handle_input(camera: Camera3D, event: InputEvent, terrain: LandscapeTerrain
 			elif _is_paint_dragging:
 				_paint_handler.cancel_preview()
 				return true
+			elif _is_color_dragging:
+				_color_handler.cancel_drag()
+				return true
 			elif _is_fence_dragging:
 				_fence_handler.cancel_drag()
 				return true
-			elif current_tool == Tool.PAINT:
+			elif current_tool == Tool.PAINT or current_tool == Tool.COLOR:
 				if mb.pressed:
 					# Start right-click - might be picker or camera movement
 					_right_click_picking = true
 				else:
-					# Right-click released - pick tile if we didn't move
+					# Right-click released - pick tile/color if we didn't move
 					if _right_click_picking:
 						_right_click_picking = false
-						_paint_handler.pick_tile_at_hover()
+						if current_tool == Tool.PAINT:
+							_paint_handler.pick_tile_at_hover()
+						elif current_tool == Tool.COLOR:
+							_color_handler.pick_color_at_hover()
 				# Don't consume - allow camera movement
 				return false
 
@@ -429,6 +472,10 @@ func _start_drag(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = fal
 			_last_painted_surface = paint_surface
 			_terrain.set_tile_previews(_paint_preview_buffer)
 		return previewed
+
+	# Handle vertex color tool
+	if current_tool == Tool.COLOR:
+		return _color_handler.start_drag(camera, mouse_pos, data)
 
 	# Handle flip diagonal tool
 	if current_tool == Tool.FLIP_DIAGONAL:
@@ -749,3 +796,8 @@ func get_brush_cells(center: Vector2i, data: TerrainData, corner: int = -1) -> A
 
 func draw_overlay(overlay: Control, terrain: LandscapeTerrain) -> void:
 	_overlay_handler.draw(overlay, terrain)
+
+
+func rotate_paint_cw() -> void:
+	if _paint_handler:
+		_paint_handler.rotate_cw()

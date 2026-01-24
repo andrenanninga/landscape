@@ -60,12 +60,15 @@ var _batch_changed: bool = false
 # Total size: grid_width * grid_depth * 13
 @export var cells: PackedInt32Array = PackedInt32Array()
 
-const CELL_DATA_SIZE := 21  # Was 13, now includes fence data
+const CELL_DATA_SIZE := 29  # Was 21, now includes vertex colors
 const TOP_OFFSET := 0
 const FLOOR_OFFSET := 4
 const TILE_OFFSET := 8  # Start of tile data (5 surfaces: top, north, east, south, west)
 const FENCE_HEIGHT_OFFSET := 13  # 4 fence heights (north, east, south, west)
 const FENCE_TILE_OFFSET := 17  # 4 fence tiles (north, east, south, west)
+const TOP_VERTEX_COLOR_OFFSET := 21  # 4 packed colors for top corners (NW, NE, SE, SW)
+const FLOOR_VERTEX_COLOR_OFFSET := 25  # 4 packed colors for floor corners (NW, NE, SE, SW)
+const DEFAULT_VERTEX_COLOR := 0xFFFFFFFF  # White (RGBA)
 
 # Bit packing constants - delegated to TilePacking for single source of truth
 const TILE_INDEX_MASK := TilePacking.TILE_INDEX_MASK
@@ -108,6 +111,14 @@ func _resize_grid(old_width: int, old_depth: int) -> void:
 	var old_cells := cells.duplicate()
 	cells.resize(new_size)
 	cells.fill(0)
+
+	# Initialize all vertex colors to default white
+	for z in grid_depth:
+		for x in grid_width:
+			var idx := _cell_index(x, z)
+			for i in 4:
+				cells[idx + TOP_VERTEX_COLOR_OFFSET + i] = DEFAULT_VERTEX_COLOR
+				cells[idx + FLOOR_VERTEX_COLOR_OFFSET + i] = DEFAULT_VERTEX_COLOR
 
 	# Copy overlapping data from old grid to new grid
 	if old_cells.size() > 0 and old_width > 0 and old_depth > 0:
@@ -216,6 +227,94 @@ func set_floor_corners(x: int, z: int, corners: Array[int]) -> void:
 	for i in 4:
 		if cells[idx + i] != corners[i]:
 			cells[idx + i] = corners[i]
+			changed = true
+	if changed:
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
+
+
+# Top corner vertex color accessors (packed as RGBA32)
+func get_top_vertex_color(x: int, z: int, corner: int) -> Color:
+	if not is_valid_cell(x, z):
+		return Color.WHITE
+	var packed := cells[_cell_index(x, z) + TOP_VERTEX_COLOR_OFFSET + corner]
+	return Color.hex(packed)
+
+
+func set_top_vertex_color(x: int, z: int, corner: int, color: Color) -> void:
+	if not is_valid_cell(x, z):
+		return
+	var packed := color.to_rgba32()
+	var idx := _cell_index(x, z) + TOP_VERTEX_COLOR_OFFSET + corner
+	if cells[idx] != packed:
+		cells[idx] = packed
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
+
+
+func get_top_vertex_colors(x: int, z: int) -> Array[int]:
+	if not is_valid_cell(x, z):
+		return [DEFAULT_VERTEX_COLOR, DEFAULT_VERTEX_COLOR, DEFAULT_VERTEX_COLOR, DEFAULT_VERTEX_COLOR]
+	var idx := _cell_index(x, z) + TOP_VERTEX_COLOR_OFFSET
+	return [cells[idx], cells[idx + 1], cells[idx + 2], cells[idx + 3]]
+
+
+func set_top_vertex_colors(x: int, z: int, colors: Array[int]) -> void:
+	if not is_valid_cell(x, z) or colors.size() != 4:
+		return
+	var idx := _cell_index(x, z) + TOP_VERTEX_COLOR_OFFSET
+	var changed := false
+	for i in 4:
+		if cells[idx + i] != colors[i]:
+			cells[idx + i] = colors[i]
+			changed = true
+	if changed:
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
+
+
+# Floor corner vertex color accessors (packed as RGBA32)
+func get_floor_vertex_color(x: int, z: int, corner: int) -> Color:
+	if not is_valid_cell(x, z):
+		return Color.WHITE
+	var packed := cells[_cell_index(x, z) + FLOOR_VERTEX_COLOR_OFFSET + corner]
+	return Color.hex(packed)
+
+
+func set_floor_vertex_color(x: int, z: int, corner: int, color: Color) -> void:
+	if not is_valid_cell(x, z):
+		return
+	var packed := color.to_rgba32()
+	var idx := _cell_index(x, z) + FLOOR_VERTEX_COLOR_OFFSET + corner
+	if cells[idx] != packed:
+		cells[idx] = packed
+		if _batch_mode:
+			_batch_changed = true
+		else:
+			data_changed.emit()
+
+
+func get_floor_vertex_colors(x: int, z: int) -> Array[int]:
+	if not is_valid_cell(x, z):
+		return [DEFAULT_VERTEX_COLOR, DEFAULT_VERTEX_COLOR, DEFAULT_VERTEX_COLOR, DEFAULT_VERTEX_COLOR]
+	var idx := _cell_index(x, z) + FLOOR_VERTEX_COLOR_OFFSET
+	return [cells[idx], cells[idx + 1], cells[idx + 2], cells[idx + 3]]
+
+
+func set_floor_vertex_colors(x: int, z: int, colors: Array[int]) -> void:
+	if not is_valid_cell(x, z) or colors.size() != 4:
+		return
+	var idx := _cell_index(x, z) + FLOOR_VERTEX_COLOR_OFFSET
+	var changed := false
+	for i in 4:
+		if cells[idx + i] != colors[i]:
+			cells[idx + i] = colors[i]
 			changed = true
 	if changed:
 		if _batch_mode:

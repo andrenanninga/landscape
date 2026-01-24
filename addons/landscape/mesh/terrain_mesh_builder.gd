@@ -66,6 +66,12 @@ func _add_top_face(corners: Array[Vector3], x: int, z: int) -> void:
 	var se := corners[2]
 	var sw := corners[3]
 
+	# Get vertex colors for each corner
+	var vc_nw := _terrain_data.get_top_vertex_color(x, z, 0)
+	var vc_ne := _terrain_data.get_top_vertex_color(x, z, 1)
+	var vc_se := _terrain_data.get_top_vertex_color(x, z, 2)
+	var vc_sw := _terrain_data.get_top_vertex_color(x, z, 3)
+
 	# UVs based on world position for tiling
 	var uv_scale := 1.0 / _terrain_data.cell_size
 	var uv_nw := Vector2(nw.x * uv_scale, nw.z * uv_scale)
@@ -86,12 +92,12 @@ func _add_top_face(corners: Array[Vector3], x: int, z: int) -> void:
 
 	if use_nw_se_diagonal:
 		# NW-SE diagonal
-		_add_triangle(nw, ne, se, uv_nw, uv_ne, uv_se, SURFACE_TOP)
-		_add_triangle(nw, se, sw, uv_nw, uv_se, uv_sw, SURFACE_TOP)
+		_add_triangle(nw, ne, se, uv_nw, uv_ne, uv_se, SURFACE_TOP, Vector2.ZERO, vc_nw, vc_ne, vc_se)
+		_add_triangle(nw, se, sw, uv_nw, uv_se, uv_sw, SURFACE_TOP, Vector2.ZERO, vc_nw, vc_se, vc_sw)
 	else:
 		# NE-SW diagonal
-		_add_triangle(nw, ne, sw, uv_nw, uv_ne, uv_sw, SURFACE_TOP)
-		_add_triangle(ne, se, sw, uv_ne, uv_se, uv_sw, SURFACE_TOP)
+		_add_triangle(nw, ne, sw, uv_nw, uv_ne, uv_sw, SURFACE_TOP, Vector2.ZERO, vc_nw, vc_ne, vc_sw)
+		_add_triangle(ne, se, sw, uv_ne, uv_se, uv_sw, SURFACE_TOP, Vector2.ZERO, vc_ne, vc_se, vc_sw)
 
 
 func _add_floor_face(corners: Array[Vector3], x: int, z: int) -> void:
@@ -99,6 +105,12 @@ func _add_floor_face(corners: Array[Vector3], x: int, z: int) -> void:
 	var ne := corners[1]
 	var se := corners[2]
 	var sw := corners[3]
+
+	# Get vertex colors for each corner (floor uses floor vertex colors)
+	var vc_nw := _terrain_data.get_floor_vertex_color(x, z, 0)
+	var vc_ne := _terrain_data.get_floor_vertex_color(x, z, 1)
+	var vc_se := _terrain_data.get_floor_vertex_color(x, z, 2)
+	var vc_sw := _terrain_data.get_floor_vertex_color(x, z, 3)
 
 	# UVs based on world position
 	var uv_scale := 1.0 / _terrain_data.cell_size
@@ -116,11 +128,11 @@ func _add_floor_face(corners: Array[Vector3], x: int, z: int) -> void:
 		use_nw_se_diagonal = not use_nw_se_diagonal
 
 	if use_nw_se_diagonal:
-		_add_triangle(nw, se, ne, uv_nw, uv_se, uv_ne, SURFACE_FLOOR)
-		_add_triangle(nw, sw, se, uv_nw, uv_sw, uv_se, SURFACE_FLOOR)
+		_add_triangle(nw, se, ne, uv_nw, uv_se, uv_ne, SURFACE_FLOOR, Vector2.ZERO, vc_nw, vc_se, vc_ne)
+		_add_triangle(nw, sw, se, uv_nw, uv_sw, uv_se, SURFACE_FLOOR, Vector2.ZERO, vc_nw, vc_sw, vc_se)
 	else:
-		_add_triangle(nw, sw, ne, uv_nw, uv_sw, uv_ne, SURFACE_FLOOR)
-		_add_triangle(ne, sw, se, uv_ne, uv_sw, uv_se, SURFACE_FLOOR)
+		_add_triangle(nw, sw, ne, uv_nw, uv_sw, uv_ne, SURFACE_FLOOR, Vector2.ZERO, vc_nw, vc_sw, vc_ne)
+		_add_triangle(ne, sw, se, uv_ne, uv_sw, uv_se, SURFACE_FLOOR, Vector2.ZERO, vc_ne, vc_sw, vc_se)
 
 
 func _add_walls(x: int, z: int, top_corners: Array[Vector3], floor_corners: Array[Vector3]) -> void:
@@ -146,6 +158,12 @@ func _add_wall_north(x: int, z: int, top: Array[Vector3], floor: Array[Vector3])
 	var floor_nw := floor[0]
 	var floor_ne := floor[1]
 
+	# Get vertex colors for the corners
+	var vc_top_nw := _terrain_data.get_top_vertex_color(x, z, 0)
+	var vc_top_ne := _terrain_data.get_top_vertex_color(x, z, 1)
+	var vc_floor_nw := _terrain_data.get_floor_vertex_color(x, z, 0)
+	var vc_floor_ne := _terrain_data.get_floor_vertex_color(x, z, 1)
+
 	if _terrain_data.is_valid_cell(x, neighbor_z):
 		# Get neighbor's south edge (their SW and SE corners)
 		var neighbor_top := _terrain_data.get_top_world_corners(x, neighbor_z)
@@ -155,11 +173,12 @@ func _add_wall_north(x: int, z: int, top: Array[Vector3], floor: Array[Vector3])
 		# Wall needed if our top is higher than neighbor's top
 		_add_wall_quad_if_needed(
 			top_nw, top_ne, neighbor_sw, neighbor_se,
-			floor_nw, floor_ne, SURFACE_NORTH
+			floor_nw, floor_ne, SURFACE_NORTH,
+			vc_top_nw, vc_top_ne, vc_floor_nw, vc_floor_ne
 		)
 	else:
 		# Outer edge - wall from top to floor
-		_add_wall_quad(top_ne, top_nw, floor_ne, floor_nw, SURFACE_NORTH)
+		_add_wall_quad(top_ne, top_nw, floor_ne, floor_nw, SURFACE_NORTH, vc_top_ne, vc_top_nw, vc_floor_ne, vc_floor_nw)
 
 
 func _add_wall_east(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -169,6 +188,12 @@ func _add_wall_east(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) 
 	var floor_ne := floor[1]
 	var floor_se := floor[2]
 
+	# Get vertex colors for the corners
+	var vc_top_ne := _terrain_data.get_top_vertex_color(x, z, 1)
+	var vc_top_se := _terrain_data.get_top_vertex_color(x, z, 2)
+	var vc_floor_ne := _terrain_data.get_floor_vertex_color(x, z, 1)
+	var vc_floor_se := _terrain_data.get_floor_vertex_color(x, z, 2)
+
 	if _terrain_data.is_valid_cell(neighbor_x, z):
 		var neighbor_top := _terrain_data.get_top_world_corners(neighbor_x, z)
 		var neighbor_nw := neighbor_top[0]  # Their NW aligns with our NE
@@ -176,10 +201,11 @@ func _add_wall_east(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) 
 
 		_add_wall_quad_if_needed(
 			top_ne, top_se, neighbor_nw, neighbor_sw,
-			floor_ne, floor_se, SURFACE_EAST
+			floor_ne, floor_se, SURFACE_EAST,
+			vc_top_ne, vc_top_se, vc_floor_ne, vc_floor_se
 		)
 	else:
-		_add_wall_quad(top_se, top_ne, floor_se, floor_ne, SURFACE_EAST)
+		_add_wall_quad(top_se, top_ne, floor_se, floor_ne, SURFACE_EAST, vc_top_se, vc_top_ne, vc_floor_se, vc_floor_ne)
 
 
 func _add_wall_south(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -189,6 +215,12 @@ func _add_wall_south(x: int, z: int, top: Array[Vector3], floor: Array[Vector3])
 	var floor_se := floor[2]
 	var floor_sw := floor[3]
 
+	# Get vertex colors for the corners
+	var vc_top_se := _terrain_data.get_top_vertex_color(x, z, 2)
+	var vc_top_sw := _terrain_data.get_top_vertex_color(x, z, 3)
+	var vc_floor_se := _terrain_data.get_floor_vertex_color(x, z, 2)
+	var vc_floor_sw := _terrain_data.get_floor_vertex_color(x, z, 3)
+
 	if _terrain_data.is_valid_cell(x, neighbor_z):
 		var neighbor_top := _terrain_data.get_top_world_corners(x, neighbor_z)
 		var neighbor_ne := neighbor_top[1]  # Their NE aligns with our SE
@@ -196,10 +228,11 @@ func _add_wall_south(x: int, z: int, top: Array[Vector3], floor: Array[Vector3])
 
 		_add_wall_quad_if_needed(
 			top_se, top_sw, neighbor_ne, neighbor_nw,
-			floor_se, floor_sw, SURFACE_SOUTH
+			floor_se, floor_sw, SURFACE_SOUTH,
+			vc_top_se, vc_top_sw, vc_floor_se, vc_floor_sw
 		)
 	else:
-		_add_wall_quad(top_sw, top_se, floor_sw, floor_se, SURFACE_SOUTH)
+		_add_wall_quad(top_sw, top_se, floor_sw, floor_se, SURFACE_SOUTH, vc_top_sw, vc_top_se, vc_floor_sw, vc_floor_se)
 
 
 func _add_wall_west(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -209,6 +242,12 @@ func _add_wall_west(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) 
 	var floor_sw := floor[3]
 	var floor_nw := floor[0]
 
+	# Get vertex colors for the corners
+	var vc_top_sw := _terrain_data.get_top_vertex_color(x, z, 3)
+	var vc_top_nw := _terrain_data.get_top_vertex_color(x, z, 0)
+	var vc_floor_sw := _terrain_data.get_floor_vertex_color(x, z, 3)
+	var vc_floor_nw := _terrain_data.get_floor_vertex_color(x, z, 0)
+
 	if _terrain_data.is_valid_cell(neighbor_x, z):
 		var neighbor_top := _terrain_data.get_top_world_corners(neighbor_x, z)
 		var neighbor_se := neighbor_top[2]  # Their SE aligns with our SW
@@ -216,17 +255,20 @@ func _add_wall_west(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) 
 
 		_add_wall_quad_if_needed(
 			top_sw, top_nw, neighbor_se, neighbor_ne,
-			floor_sw, floor_nw, SURFACE_WEST
+			floor_sw, floor_nw, SURFACE_WEST,
+			vc_top_sw, vc_top_nw, vc_floor_sw, vc_floor_nw
 		)
 	else:
-		_add_wall_quad(top_nw, top_sw, floor_nw, floor_sw, SURFACE_WEST)
+		_add_wall_quad(top_nw, top_sw, floor_nw, floor_sw, SURFACE_WEST, vc_top_nw, vc_top_sw, vc_floor_nw, vc_floor_sw)
 
 
 func _add_wall_quad_if_needed(
 	our_top1: Vector3, our_top2: Vector3,
 	neighbor_top1: Vector3, neighbor_top2: Vector3,
 	our_floor1: Vector3, our_floor2: Vector3,
-	surface_type: int
+	surface_type: int,
+	vc_top1: Color = Color.WHITE, vc_top2: Color = Color.WHITE,
+	vc_floor1: Color = Color.WHITE, vc_floor2: Color = Color.WHITE
 ) -> void:
 	# Generate wall segments where our top is higher than neighbor's top
 	# This creates stepped walls for height differences
@@ -238,10 +280,10 @@ func _add_wall_quad_if_needed(
 	if our_top1.y > wall_bottom1 or our_top2.y > wall_bottom2:
 		var bottom1 := Vector3(our_top1.x, wall_bottom1, our_top1.z)
 		var bottom2 := Vector3(our_top2.x, wall_bottom2, our_top2.z)
-		_add_wall_quad(our_top1, our_top2, bottom1, bottom2, surface_type)
+		_add_wall_quad(our_top1, our_top2, bottom1, bottom2, surface_type, vc_top1, vc_top2, vc_floor1, vc_floor2)
 
 
-func _add_wall_quad(top1: Vector3, top2: Vector3, bottom1: Vector3, bottom2: Vector3, surface_type: int = SURFACE_NORTH) -> void:
+func _add_wall_quad(top1: Vector3, top2: Vector3, bottom1: Vector3, bottom2: Vector3, surface_type: int = SURFACE_NORTH, vc_top1: Color = Color.WHITE, vc_top2: Color = Color.WHITE, vc_bottom1: Color = Color.WHITE, vc_bottom2: Color = Color.WHITE) -> void:
 	# Skip degenerate walls
 	if top1.y <= bottom1.y and top2.y <= bottom2.y:
 		return
@@ -262,40 +304,40 @@ func _add_wall_quad(top1: Vector3, top2: Vector3, bottom1: Vector3, bottom2: Vec
 
 	# Two triangles for quad - reversed winding for outward facing
 	# Triangle 1: top1, bottom2, top2
-	_add_triangle_with_uv2(top1, bottom2, top2, uv_top1, uv_bottom2, uv_top2, bounds1, bounds2, bounds2, surface_type)
+	_add_triangle_with_uv2(top1, bottom2, top2, uv_top1, uv_bottom2, uv_top2, bounds1, bounds2, bounds2, surface_type, vc_top1, vc_bottom2, vc_top2)
 	# Triangle 2: top1, bottom1, bottom2
-	_add_triangle_with_uv2(top1, bottom1, bottom2, uv_top1, uv_bottom1, uv_bottom2, bounds1, bounds1, bounds2, surface_type)
+	_add_triangle_with_uv2(top1, bottom1, bottom2, uv_top1, uv_bottom1, uv_bottom2, bounds1, bounds1, bounds2, surface_type, vc_top1, vc_bottom1, vc_bottom2)
 
 
-func _add_triangle_with_uv2(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2, uv2_1: Vector2, uv2_2: Vector2, uv2_3: Vector2, surface_type: int) -> void:
-	# Encode surface type in vertex color (R channel: 0-9 normalized to 0-1)
-	var surface_color := Color(float(surface_type) / 9.0, 0.0, 0.0, 1.0)
-	_st.set_color(surface_color)
+func _add_triangle_with_uv2(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2, uv2_1: Vector2, uv2_2: Vector2, uv2_3: Vector2, surface_type: int, vc1: Color = Color.WHITE, vc2: Color = Color.WHITE, vc3: Color = Color.WHITE) -> void:
+	# Encode vertex color in RGB and surface type in alpha
+	var surface_alpha := float(surface_type) / 9.0
+	_st.set_color(Color(vc1.r, vc1.g, vc1.b, surface_alpha))
 	_st.set_uv(uv1)
 	_st.set_uv2(uv2_1)
 	_st.add_vertex(v1)
-	_st.set_color(surface_color)
+	_st.set_color(Color(vc2.r, vc2.g, vc2.b, surface_alpha))
 	_st.set_uv(uv2)
 	_st.set_uv2(uv2_2)
 	_st.add_vertex(v2)
-	_st.set_color(surface_color)
+	_st.set_color(Color(vc3.r, vc3.g, vc3.b, surface_alpha))
 	_st.set_uv(uv3)
 	_st.set_uv2(uv2_3)
 	_st.add_vertex(v3)
 
 
-func _add_triangle(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2, surface_type: int = SURFACE_TOP, uv2_data: Vector2 = Vector2.ZERO) -> void:
-	# Encode surface type in vertex color (R channel: 0-9 normalized to 0-1)
-	var surface_color := Color(float(surface_type) / 9.0, 0.0, 0.0, 1.0)
-	_st.set_color(surface_color)
+func _add_triangle(v1: Vector3, v2: Vector3, v3: Vector3, uv1: Vector2, uv2: Vector2, uv3: Vector2, surface_type: int = SURFACE_TOP, uv2_data: Vector2 = Vector2.ZERO, vc1: Color = Color.WHITE, vc2: Color = Color.WHITE, vc3: Color = Color.WHITE) -> void:
+	# Encode vertex color in RGB and surface type in alpha
+	var surface_alpha := float(surface_type) / 9.0
+	_st.set_color(Color(vc1.r, vc1.g, vc1.b, surface_alpha))
 	_st.set_uv(uv1)
 	_st.set_uv2(uv2_data)
 	_st.add_vertex(v1)
-	_st.set_color(surface_color)
+	_st.set_color(Color(vc2.r, vc2.g, vc2.b, surface_alpha))
 	_st.set_uv(uv2)
 	_st.set_uv2(uv2_data)
 	_st.add_vertex(v2)
-	_st.set_color(surface_color)
+	_st.set_color(Color(vc3.r, vc3.g, vc3.b, surface_alpha))
 	_st.set_uv(uv3)
 	_st.set_uv2(uv2_data)
 	_st.add_vertex(v3)
@@ -333,6 +375,8 @@ func _add_fence_edge(x: int, z: int, edge: int, top_corners: Array[Vector3]) -> 
 	var base_left: Vector3
 	var base_right: Vector3
 	var surface_type: int
+	var vc_left: Color
+	var vc_right: Color
 
 	# Edge mapping: 0=N, 1=E, 2=S, 3=W
 	# Corner mapping for each edge:
@@ -347,24 +391,32 @@ func _add_fence_edge(x: int, z: int, edge: int, top_corners: Array[Vector3]) -> 
 			base_right = top_corners[1]
 			base_right.y = maxf(base_right.y, neighbor_top[2].y)  # max(NE, neighbor SE)
 			surface_type = SURFACE_FENCE_NORTH
+			vc_left = _terrain_data.get_top_vertex_color(x, z, 0)
+			vc_right = _terrain_data.get_top_vertex_color(x, z, 1)
 		1:  # EAST
 			base_left = top_corners[1]
 			base_left.y = maxf(base_left.y, neighbor_top[0].y)  # max(NE, neighbor NW)
 			base_right = top_corners[2]
 			base_right.y = maxf(base_right.y, neighbor_top[3].y)  # max(SE, neighbor SW)
 			surface_type = SURFACE_FENCE_EAST
+			vc_left = _terrain_data.get_top_vertex_color(x, z, 1)
+			vc_right = _terrain_data.get_top_vertex_color(x, z, 2)
 		2:  # SOUTH
 			base_left = top_corners[2]
 			base_left.y = maxf(base_left.y, neighbor_top[1].y)  # max(SE, neighbor NE)
 			base_right = top_corners[3]
 			base_right.y = maxf(base_right.y, neighbor_top[0].y)  # max(SW, neighbor NW)
 			surface_type = SURFACE_FENCE_SOUTH
+			vc_left = _terrain_data.get_top_vertex_color(x, z, 2)
+			vc_right = _terrain_data.get_top_vertex_color(x, z, 3)
 		3:  # WEST
 			base_left = top_corners[3]
 			base_left.y = maxf(base_left.y, neighbor_top[2].y)  # max(SW, neighbor SE)
 			base_right = top_corners[0]
 			base_right.y = maxf(base_right.y, neighbor_top[1].y)  # max(NW, neighbor NE)
 			surface_type = SURFACE_FENCE_WEST
+			vc_left = _terrain_data.get_top_vertex_color(x, z, 3)
+			vc_right = _terrain_data.get_top_vertex_color(x, z, 0)
 
 	# Calculate fence top positions (base + fence height)
 	var top_left := Vector3(base_left.x, base_left.y + fence_h[0] * height_step, base_left.z)
@@ -391,11 +443,11 @@ func _add_fence_edge(x: int, z: int, edge: int, top_corners: Array[Vector3]) -> 
 		if neighbor_left_y >= top_left.y and neighbor_right_y >= top_right.y:
 			return  # Fence completely obscured, don't draw
 
-	# Generate double-sided fence quad
-	_add_fence_quad(top_left, top_right, base_right, base_left, surface_type)
+	# Generate double-sided fence quad (use same vertex color for top and bottom of fence)
+	_add_fence_quad(top_left, top_right, base_right, base_left, surface_type, vc_left, vc_right)
 
 
-func _add_fence_quad(top_left: Vector3, top_right: Vector3, bottom_right: Vector3, bottom_left: Vector3, surface_type: int) -> void:
+func _add_fence_quad(top_left: Vector3, top_right: Vector3, bottom_right: Vector3, bottom_left: Vector3, surface_type: int, vc_left: Color = Color.WHITE, vc_right: Color = Color.WHITE) -> void:
 	# Skip degenerate fences
 	if top_left.y <= bottom_left.y and top_right.y <= bottom_right.y:
 		return
@@ -414,12 +466,12 @@ func _add_fence_quad(top_left: Vector3, top_right: Vector3, bottom_right: Vector
 
 	# Front face (outward facing from the cell)
 	# Triangle 1: top_left, bottom_right, top_right
-	_add_triangle_with_uv2(top_left, bottom_right, top_right, uv_top_left, uv_bottom_right, uv_top_right, bounds_left, bounds_right, bounds_right, surface_type)
+	_add_triangle_with_uv2(top_left, bottom_right, top_right, uv_top_left, uv_bottom_right, uv_top_right, bounds_left, bounds_right, bounds_right, surface_type, vc_left, vc_right, vc_right)
 	# Triangle 2: top_left, bottom_left, bottom_right
-	_add_triangle_with_uv2(top_left, bottom_left, bottom_right, uv_top_left, uv_bottom_left, uv_bottom_right, bounds_left, bounds_left, bounds_right, surface_type)
+	_add_triangle_with_uv2(top_left, bottom_left, bottom_right, uv_top_left, uv_bottom_left, uv_bottom_right, bounds_left, bounds_left, bounds_right, surface_type, vc_left, vc_left, vc_right)
 
 	# Back face (inward facing - reversed winding)
 	# Triangle 1: top_left, top_right, bottom_right
-	_add_triangle_with_uv2(top_left, top_right, bottom_right, uv_top_left, uv_top_right, uv_bottom_right, bounds_left, bounds_right, bounds_right, surface_type)
+	_add_triangle_with_uv2(top_left, top_right, bottom_right, uv_top_left, uv_top_right, uv_bottom_right, bounds_left, bounds_right, bounds_right, surface_type, vc_left, vc_right, vc_right)
 	# Triangle 2: top_left, bottom_right, bottom_left
-	_add_triangle_with_uv2(top_left, bottom_right, bottom_left, uv_top_left, uv_bottom_right, uv_bottom_left, bounds_left, bounds_right, bounds_left, surface_type)
+	_add_triangle_with_uv2(top_left, bottom_right, bottom_left, uv_top_left, uv_bottom_right, uv_bottom_left, bounds_left, bounds_right, bounds_left, surface_type, vc_left, vc_right, vc_left)
