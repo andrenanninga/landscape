@@ -178,7 +178,7 @@ func _add_wall_north(x: int, z: int, top: Array[Vector3], floor: Array[Vector3])
 		)
 	else:
 		# Outer edge - wall from top to floor
-		_add_wall_quad(top_ne, top_nw, floor_ne, floor_nw, SURFACE_NORTH, vc_top_ne, vc_top_nw, vc_floor_ne, vc_floor_nw)
+		_add_wall_quad(top_nw, top_ne, floor_nw, floor_ne, SURFACE_NORTH, vc_top_nw, vc_top_ne, vc_floor_nw, vc_floor_ne)
 
 
 func _add_wall_east(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -205,7 +205,7 @@ func _add_wall_east(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) 
 			vc_top_ne, vc_top_se, vc_floor_ne, vc_floor_se
 		)
 	else:
-		_add_wall_quad(top_se, top_ne, floor_se, floor_ne, SURFACE_EAST, vc_top_se, vc_top_ne, vc_floor_se, vc_floor_ne)
+		_add_wall_quad(top_ne, top_se, floor_ne, floor_se, SURFACE_EAST, vc_top_ne, vc_top_se, vc_floor_ne, vc_floor_se)
 
 
 func _add_wall_south(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -232,7 +232,7 @@ func _add_wall_south(x: int, z: int, top: Array[Vector3], floor: Array[Vector3])
 			vc_top_se, vc_top_sw, vc_floor_se, vc_floor_sw
 		)
 	else:
-		_add_wall_quad(top_sw, top_se, floor_sw, floor_se, SURFACE_SOUTH, vc_top_sw, vc_top_se, vc_floor_sw, vc_floor_se)
+		_add_wall_quad(top_se, top_sw, floor_se, floor_sw, SURFACE_SOUTH, vc_top_se, vc_top_sw, vc_floor_se, vc_floor_sw)
 
 
 func _add_wall_west(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) -> void:
@@ -259,7 +259,7 @@ func _add_wall_west(x: int, z: int, top: Array[Vector3], floor: Array[Vector3]) 
 			vc_top_sw, vc_top_nw, vc_floor_sw, vc_floor_nw
 		)
 	else:
-		_add_wall_quad(top_nw, top_sw, floor_nw, floor_sw, SURFACE_WEST, vc_top_nw, vc_top_sw, vc_floor_nw, vc_floor_sw)
+		_add_wall_quad(top_sw, top_nw, floor_sw, floor_nw, SURFACE_WEST, vc_top_sw, vc_top_nw, vc_floor_sw, vc_floor_nw)
 
 
 func _add_wall_quad_if_needed(
