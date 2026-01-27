@@ -243,6 +243,12 @@ void fragment() {
 		atlas_id = tile_info.atlas_id;
 		wall_align = tile_info.wall_align;
 
+		// Check for erased tile early (before animation lookup)
+		bool is_erased = atlas_id == 255 && tile_x == 255 && tile_y == 255;
+		if (is_erased) {
+			discard;
+		}
+
 		// Check for animation and offset tile_x if animated
 		AnimInfo anim = get_animation_info(tile_x, tile_y, atlas_id, atlas_columns[atlas_id]);
 		if (anim.frame_count > 1) {
@@ -265,12 +271,6 @@ void fragment() {
 
 	// Apply rotation and flip transformations
 	local_uv = transform_uv(local_uv, rotation, flip_h, flip_v);
-
-	// Check for erased tile (atlas_id = 255 and coords = 255, 255)
-	bool is_erased = atlas_id == 255 && tile_x == 255 && tile_y == 255;
-	if (is_erased) {
-		discard;
-	}
 
 	// Convert to atlas UV and sample from the atlas array
 	vec2 atlas_uv = get_atlas_uv(tile_x, tile_y, atlas_id, local_uv);
