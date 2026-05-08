@@ -52,7 +52,7 @@ const DEFAULT_PANEL_SIZE := Vector2(800.0, 700.0)
 @onready var _color_blend_mode_selector: OptionButton = %ColorBlendModeSelector
 
 var _wall_align_icons: Array[Texture2D] = []
-const WALL_ALIGN_TOOLTIPS: Array[String] = ["Wall alignment: World", "Wall alignment: Top", "Wall alignment: Bottom"]
+const WALL_ALIGN_TOOLTIPS: Array[String] = ["Wall alignment: World", "Wall alignment: Top", "Wall alignment: Bottom", "Wall alignment: Stretch"]
 
 
 func _ready() -> void:
@@ -187,9 +187,10 @@ func _setup_paint_controls() -> void:
 
 	# Cache wall align icons
 	_wall_align_icons = [
-		get_theme_icon("ControlAlignFullRect", "EditorIcons"),  # World
+		get_theme_icon("ControlAlignFullRect", "EditorIcons"),    # World
 		get_theme_icon("ControlAlignTopWide", "EditorIcons"),     # Top
-		get_theme_icon("ControlAlignBottomWide", "EditorIcons"), # Bottom
+		get_theme_icon("ControlAlignBottomWide", "EditorIcons"),  # Bottom
+		get_theme_icon("ControlAlignVCenterWide", "EditorIcons"), # Stretch
 	]
 
 	if _wall_align_button:
@@ -302,7 +303,7 @@ func _on_erase_toggled(pressed: bool) -> void:
 func _on_wall_align_cycle() -> void:
 	if terrain_editor:
 		var current := terrain_editor.current_paint_wall_align as int
-		var next := (current + 1) % 3
+		var next := (current + 1) % 4
 		terrain_editor.current_paint_wall_align = next as TerrainData.WallAlign
 		_update_wall_align_button()
 

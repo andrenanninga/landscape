@@ -54,7 +54,7 @@ struct TileInfo {
 	int flip_h;      // 0 or 1
 	int flip_v;      // 0 or 1
 	int atlas_id;    // Which atlas this tile is from
-	int wall_align;  // 0=world, 1=top, 2=bottom (for wall surfaces)
+	int wall_align;  // 0=world, 1=top, 2=bottom, 3=stretch (for wall surfaces)
 };
 
 // Get tile data from data texture
@@ -144,6 +144,9 @@ vec2 get_surface_uv(vec3 pos, int surface, int align_mode, vec2 bounds) {
 		v_uv = fract((wall_top - pos.y) / cell_size);
 	} else if (align_mode == 2) {
 		v_uv = fract((wall_bottom - pos.y) / cell_size);
+	} else if (align_mode == 3) {
+		float wall_height = wall_top - wall_bottom;
+		v_uv = wall_height > 0.0 ? (wall_top - pos.y) / wall_height : 0.0;
 	} else {
 		v_uv = fract(-pos.y / cell_size);
 	}

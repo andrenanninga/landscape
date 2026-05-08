@@ -17,7 +17,7 @@ enum Surface {
 enum Rotation { ROT_0 = 0, ROT_90 = 1, ROT_180 = 2, ROT_270 = 3 }
 
 # Wall alignment modes (how tiles are positioned vertically on walls)
-enum WallAlign { WORLD = 0, TOP = 1, BOTTOM = 2 }
+enum WallAlign { WORLD = 0, TOP = 1, BOTTOM = 2, STRETCH = 3 }
 
 # Grid configuration
 var _skip_resize: bool = false
@@ -129,6 +129,54 @@ func _resize_grid(old_width: int, old_depth: int) -> void:
 			for x in copy_width:
 				var old_idx := (z * old_width + x) * CELL_DATA_SIZE
 				var new_idx := (z * grid_width + x) * CELL_DATA_SIZE
+				for i in CELL_DATA_SIZE:
+					cells[new_idx + i] = old_cells[old_idx + i]
+
+	data_changed.emit()
+
+
+# Resize grid with offset, allowing growth/crop from any direction
+# offset_x: positive = grow west (shift data east), negative = crop west (shift data west)
+# offset_z: positive = grow north (shift data south), negative = crop north (shift data north)
+func resize_with_offset(new_width: int, new_depth: int, offset_x: int, offset_z: int) -> void:
+	new_width = maxi(1, new_width)
+	new_depth = maxi(1, new_depth)
+
+	var old_width := grid_width
+	var old_depth := grid_depth
+	var old_cells := cells.duplicate()
+
+	# Update dimensions without triggering normal resize
+	_skip_resize = true
+	grid_width = new_width
+	grid_depth = new_depth
+	_skip_resize = false
+
+	var new_size := new_width * new_depth * CELL_DATA_SIZE
+	cells.resize(new_size)
+	cells.fill(0)
+
+	# Initialize all vertex colors to default white
+	for z in new_depth:
+		for x in new_width:
+			var idx := _cell_index(x, z)
+			for i in 4:
+				cells[idx + TOP_VERTEX_COLOR_OFFSET + i] = DEFAULT_VERTEX_COLOR
+				cells[idx + FLOOR_VERTEX_COLOR_OFFSET + i] = DEFAULT_VERTEX_COLOR
+
+	# Copy data with offset
+	if old_cells.size() > 0 and old_width > 0 and old_depth > 0:
+		for old_z in old_depth:
+			for old_x in old_width:
+				var new_x := old_x + offset_x
+				var new_z := old_z + offset_z
+
+				# Skip if outside new bounds
+				if new_x < 0 or new_x >= new_width or new_z < 0 or new_z >= new_depth:
+					continue
+
+				var old_idx := (old_z * old_width + old_x) * CELL_DATA_SIZE
+				var new_idx := (new_z * new_width + new_x) * CELL_DATA_SIZE
 				for i in CELL_DATA_SIZE:
 					cells[new_idx + i] = old_cells[old_idx + i]
 

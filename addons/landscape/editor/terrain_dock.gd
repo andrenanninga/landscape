@@ -114,6 +114,7 @@ func _setup_paint_controls() -> void:
 		_wall_align_selector.add_item("World", TerrainData.WallAlign.WORLD)
 		_wall_align_selector.add_item("Top", TerrainData.WallAlign.TOP)
 		_wall_align_selector.add_item("Bottom", TerrainData.WallAlign.BOTTOM)
+		_wall_align_selector.add_item("Stretch", TerrainData.WallAlign.STRETCH)
 		_wall_align_selector.item_selected.connect(_on_wall_align_selected)
 
 	if _zoom_in_button:
