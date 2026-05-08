@@ -1,12 +1,10 @@
 shader_type spatial;
-render_mode blend_mix, depth_prepass_alpha;
-// PBR rendering - works with Godot's lighting and environment
 
 // Tile atlas array texture (multiple atlas sources)
 uniform sampler2DArray tile_atlas_array : source_color, filter_nearest, repeat_disable;
 
 // Tile data texture - stores per-cell tile info
-// Layout: width = grid_width * 5 (5 surfaces per cell), height = grid_depth
+// Layout: width = grid_width * 9 (5 surfaces + 4 fence surfaces per cell), height = grid_depth
 // RGBA8 format: R = atlas tile X coord, G = atlas tile Y coord, B = flags (rotation + flip), A = atlas_id
 uniform sampler2D tile_data : filter_nearest, repeat_disable;
 
@@ -19,17 +17,11 @@ uniform int atlas_columns[8];
 uniform int atlas_rows[8];
 uniform int atlas_count = 1;
 
-// Animation data texture
-// Layout: width = max_cols * max_rows, height = atlas_count
-// RGBA8: R = frame count, G = anim columns, B = speed (scaled by 25.5), A = reserved
-uniform sampler2D animation_data : filter_nearest, repeat_disable;
-uniform ivec2 anim_data_size = ivec2(256, 8);
-
 // PBR material properties
 uniform float roughness : hint_range(0.0, 1.0) = 0.8;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
 
-// Selection highlight (kept from original shader)
+// Selection highlight
 uniform vec2 selected_cell = vec2(-1.0, -1.0);
 uniform int selected_corner = -1;
 uniform bool corner_mode = false;
@@ -41,7 +33,6 @@ varying vec3 world_position;
 varying vec3 local_position;
 varying flat int surface_type;
 varying vec2 wall_bounds;  // UV2: x = wall top Y, y = wall bottom Y (for wall alignment)
-
 varying vec3 vertex_color;
 
 void vertex() {
@@ -51,9 +42,7 @@ void vertex() {
 	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor,
 	// 6=fence_north, 7=fence_east, 8=fence_south, 9=fence_west
 	surface_type = int(round(COLOR.a * 9.0));
-	// Vertex color RGB for tinting
 	vertex_color = COLOR.rgb;
-	// Pass wall bounds from UV2 (used for wall alignment calculations)
 	wall_bounds = UV2;
 }
 
@@ -70,8 +59,6 @@ struct TileInfo {
 
 // Get tile data from data texture
 TileInfo get_tile_data(ivec2 cell, int surface) {
-	// Calculate UV for tile data texture
-	// Width = grid_width * 9 (5 surfaces + 4 fence surfaces per cell)
 	vec2 data_uv = vec2(
 		(float(cell.x * 9 + surface) + 0.5) / float(grid_size.x * 9),
 		(float(cell.y) + 0.5) / float(grid_size.y)
@@ -99,7 +86,6 @@ TileInfo get_tile_data(ivec2 cell, int surface) {
 
 // Apply rotation and flip to UV coordinates
 vec2 transform_uv(vec2 uv, int rotation, bool flip_h, bool flip_v) {
-	// Apply flip first
 	if (flip_h) {
 		uv.x = 1.0 - uv.x;
 	}
@@ -107,7 +93,7 @@ vec2 transform_uv(vec2 uv, int rotation, bool flip_h, bool flip_v) {
 		uv.y = 1.0 - uv.y;
 	}
 
-	// Apply rotation (clockwise: 0=0°, 1=90°, 2=180°, 3=270°)
+	// Clockwise: 0=0°, 1=90°, 2=180°, 3=270°
 	if (rotation == 1) {
 		uv = vec2(1.0 - uv.y, uv.x);
 	} else if (rotation == 2) {
@@ -117,29 +103,6 @@ vec2 transform_uv(vec2 uv, int rotation, bool flip_h, bool flip_v) {
 	}
 
 	return uv;
-}
-
-// Animation info struct
-struct AnimInfo {
-	int frame_count;
-	int anim_columns;
-	float speed;
-};
-
-// Get animation info for a tile from the animation data texture
-AnimInfo get_animation_info(int tile_x, int tile_y, int atlas_id, int atlas_cols) {
-	int linear_idx = tile_y * atlas_cols + tile_x;
-	vec2 anim_uv = vec2(
-		(float(linear_idx) + 0.5) / float(anim_data_size.x),
-		(float(atlas_id) + 0.5) / float(anim_data_size.y)
-	);
-	vec4 data = texture(animation_data, anim_uv);
-
-	AnimInfo info;
-	info.frame_count = int(data.r * 255.0);
-	info.anim_columns = int(data.g * 255.0);
-	info.speed = data.b * 25.5;
-	return info;
 }
 
 // Convert tile coords + local UV to atlas UV for a specific atlas
@@ -154,7 +117,6 @@ vec2 get_atlas_uv(int tile_x, int tile_y, int atlas_id, vec2 local_uv) {
 }
 
 // Get local UV coordinates within a cell based on surface type
-// Surface types: 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor
 // align_mode: 0=world, 1=top, 2=bottom (only used for wall surfaces)
 // bounds: x=wall_top_y, y=wall_bottom_y (only used for wall surfaces)
 vec2 get_surface_uv(vec3 pos, int surface, int align_mode, vec2 bounds) {
@@ -163,7 +125,7 @@ vec2 get_surface_uv(vec3 pos, int surface, int align_mode, vec2 bounds) {
 		return fract(pos.xz / cell_size);
 	}
 
-	// Wall surfaces - calculate horizontal and vertical UV
+	// Wall surfaces - horizontal UV
 	float h_uv;
 	if (surface == 1 || surface == 3) {
 		// North/South walls - use X for horizontal
@@ -173,20 +135,16 @@ vec2 get_surface_uv(vec3 pos, int surface, int align_mode, vec2 bounds) {
 		h_uv = fract(pos.z / cell_size);
 	}
 
-	// Calculate vertical UV based on wall alignment mode
-	// All modes render right-side-up (V decreases as Y increases)
+	// Vertical UV based on wall alignment mode (V decreases as Y increases = right-side-up)
 	float v_uv;
 	float wall_top = bounds.x;
 	float wall_bottom = bounds.y;
 
 	if (align_mode == 1) {
-		// Top alignment: tile anchored at wall top
 		v_uv = fract((wall_top - pos.y) / cell_size);
 	} else if (align_mode == 2) {
-		// Bottom alignment: tile anchored at wall bottom
 		v_uv = fract((wall_bottom - pos.y) / cell_size);
 	} else {
-		// World alignment (default): tile based on world Y position
 		v_uv = fract(-pos.y / cell_size);
 	}
 
@@ -194,29 +152,23 @@ vec2 get_surface_uv(vec3 pos, int surface, int align_mode, vec2 bounds) {
 }
 
 void fragment() {
-	// Use surface type from vertex color (set by mesh builder)
-	// 0=top, 1=north, 2=east, 3=south, 4=west, 5=floor,
-	// 6=fence_north, 7=fence_east, 8=fence_south, 9=fence_west
 	int surface = surface_type;
 
-	// Adjust position for wall/fence surfaces to get correct cell
-	// Walls/fences are on cell boundaries, so we offset slightly into the correct cell
+	// Walls/fences sit on cell boundaries — nudge slightly into the owning cell
 	vec3 adjusted_pos = local_position;
-	if (surface == 1 || surface == 6) { // NORTH wall/fence - at z = cell_z * cell_size
+	if (surface == 1 || surface == 6) {       // NORTH
 		adjusted_pos.z += 0.01;
-	} else if (surface == 2 || surface == 7) { // EAST wall/fence - at x = (cell_x + 1) * cell_size
+	} else if (surface == 2 || surface == 7) { // EAST
 		adjusted_pos.x -= 0.01;
-	} else if (surface == 3 || surface == 8) { // SOUTH wall/fence - at z = (cell_z + 1) * cell_size
+	} else if (surface == 3 || surface == 8) { // SOUTH
 		adjusted_pos.z -= 0.01;
-	} else if (surface == 4 || surface == 9) { // WEST wall/fence - at x = cell_x * cell_size
+	} else if (surface == 4 || surface == 9) { // WEST
 		adjusted_pos.x += 0.01;
 	}
 
-	// Determine which cell we're in
 	ivec2 cell = ivec2(floor(adjusted_pos.xz / cell_size));
 	cell = clamp(cell, ivec2(0), grid_size - ivec2(1));
 
-	// For floor surfaces, use tile (0,0) with no transformations
 	int tile_x = 0;
 	int tile_y = 0;
 	int rotation = 0;
@@ -225,11 +177,9 @@ void fragment() {
 	int atlas_id = 0;
 	int wall_align = 0;
 
-	// Get tile data for non-floor surfaces
-	// floor = 5 uses default, fence surfaces (6-9) use indices 5-8 in tile data
+	// floor (surface 5) uses default tile (0,0); fence surfaces map to tile data indices 5-8
 	int data_surface = surface;
 	if (surface >= 6) {
-		// Map fence surfaces 6-9 to tile data indices 5-8
 		data_surface = surface - 1;
 	}
 
@@ -243,46 +193,27 @@ void fragment() {
 		atlas_id = tile_info.atlas_id;
 		wall_align = tile_info.wall_align;
 
-		// Check for erased tile early (before animation lookup)
-		bool is_erased = atlas_id == 255 && tile_x == 255 && tile_y == 255;
-		if (is_erased) {
+		if (atlas_id == 255 && tile_x == 255 && tile_y == 255) {
 			discard;
 		}
-
-		// Check for animation and offset tile_x if animated
-		AnimInfo anim = get_animation_info(tile_x, tile_y, atlas_id, atlas_columns[atlas_id]);
-		if (anim.frame_count > 1) {
-			float anim_time = TIME * anim.speed;
-			int current_frame = int(mod(anim_time, float(anim.frame_count)));
-			tile_x += current_frame;  // Frames are arranged horizontally
-		}
 	}
 
-	// Map fence surfaces to their equivalent wall surface for UV calculation
-	int uv_surface = surface;
-	if (surface >= 6) {
-		// Fence surfaces use same UV logic as their wall counterparts
-		// 6 (fence_north) -> 1 (north), 7 -> 2, 8 -> 3, 9 -> 4
-		uv_surface = surface - 5;
-	}
+	// Fence surfaces share UV logic with their wall counterparts (6→1, 7→2, 8→3, 9→4)
+	int uv_surface = surface >= 6 ? surface - 5 : surface;
 
-	// Get local UV within cell (wall_align and wall_bounds used for wall/fence surfaces)
 	vec2 local_uv = get_surface_uv(local_position, uv_surface, wall_align, wall_bounds);
-
-	// Apply rotation and flip transformations
 	local_uv = transform_uv(local_uv, rotation, flip_h, flip_v);
 
-	// Convert to atlas UV and sample from the atlas array
 	vec2 atlas_uv = get_atlas_uv(tile_x, tile_y, atlas_id, local_uv);
 	vec4 albedo = texture(tile_atlas_array, vec3(atlas_uv, float(atlas_id)));
 
-	// Set PBR outputs - apply vertex color tint
 	ALBEDO = albedo.rgb * vertex_color;
 	ALPHA = albedo.a;
+	ALPHA_SCISSOR_THRESHOLD = 0.5;
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
 
-	// Selection highlight (on top surfaces only)
+	// Selection highlight on top faces only
 	bool is_top_face = surface == 0;
 	if (selected_cell.x >= 0.0 && is_top_face) {
 		vec2 cell_min = selected_cell * cell_size;
@@ -302,16 +233,10 @@ void fragment() {
 				else corner_pos = vec2(0.0, 1.0);
 
 				vec2 to_pos = norm_pos - corner_pos;
-				float size = corner_highlight_size;
-				float border = selection_border_width;
-
-				bool in_corner_region = abs(to_pos.x) < size && abs(to_pos.y) < size;
+				bool in_corner_region = abs(to_pos.x) < corner_highlight_size && abs(to_pos.y) < corner_highlight_size;
 
 				if (in_corner_region) {
-					bool on_x_edge = abs(to_pos.x) < border;
-					bool on_y_edge = abs(to_pos.y) < border;
-
-					if (on_x_edge || on_y_edge) {
+					if (abs(to_pos.x) < selection_border_width || abs(to_pos.y) < selection_border_width) {
 						ALBEDO = mix(ALBEDO, selection_color, 0.7);
 					} else {
 						ALBEDO = mix(ALBEDO, vec3(1.0), 0.1);

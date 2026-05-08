@@ -24,50 +24,10 @@ signal terrain_changed
 
 @export var auto_rebuild: bool = true
 
-@export_group("Grid")
-@export var grid_width: int = 8:
-	get:
-		return terrain_data.grid_width if terrain_data else 8
-	set(value):
-		if terrain_data:
-			terrain_data.grid_width = value
-
-@export var grid_depth: int = 8:
-	get:
-		return terrain_data.grid_depth if terrain_data else 8
-	set(value):
-		if terrain_data:
-			terrain_data.grid_depth = value
-
-@export var cell_size: float = 1.0:
-	get:
-		return terrain_data.cell_size if terrain_data else 1.0
-	set(value):
-		if terrain_data:
-			terrain_data.cell_size = value
-
-@export_group("Height")
-@export var height_step: float = 0.25:
-	get:
-		return terrain_data.height_step if terrain_data else 0.25
-	set(value):
-		if terrain_data:
-			terrain_data.height_step = value
-
-@export var max_slope_steps: int = 1:
-	get:
-		return terrain_data.max_slope_steps if terrain_data else 1
-	set(value):
-		if terrain_data:
-			terrain_data.max_slope_steps = value
-
-@export_group("")
-
 var _mesh_builder: TerrainMeshBuilder
 var _tile_data_texture: ImageTexture
 var _preview: TerrainPreview
 var _atlas_array_texture: Texture2DArray
-var _animation_data_texture: ImageTexture
 
 
 func _ready() -> void:
@@ -174,8 +134,8 @@ func _update_tile_data_texture() -> void:
 			# Process 4 fence surfaces (fence_north, fence_east, fence_south, fence_west)
 			var fence_tiles := terrain_data.get_all_fence_tiles_packed(x, z)
 			for edge in 4:
-				var fence_surface := 5 + edge  # 5=fence_north, 6=fence_east, 7=fence_south, 8=fence_west
-				var key := "%d,%d,%d" % [x, z, fence_surface + 1]  # Surface enum: FENCE_NORTH=5, etc.
+				var fence_surface := 5 + edge  # Surface enum: FENCE_NORTH=5, FENCE_EAST=6, etc.
+				var key := "%d,%d,%d" % [x, z, fence_surface]
 				var packed: int
 				if _preview and _preview.has(key):
 					packed = _preview.get_value(key)
@@ -270,65 +230,6 @@ func _update_atlas_array() -> void:
 		_atlas_array_texture = null
 
 
-func _update_animation_data_texture() -> void:
-	_animation_data_texture = null
-
-	if not tile_set or tile_set.get_atlas_count() == 0:
-		return
-
-	# Find max dimensions needed across all atlases
-	var max_cols := 1
-	var max_rows := 1
-	for i in tile_set.get_atlas_count():
-		var info := tile_set.get_atlas_info(i)
-		max_cols = maxi(max_cols, info.columns)
-		max_rows = maxi(max_rows, info.rows)
-
-	var atlas_count := tile_set.get_atlas_count()
-
-	# Create RGBA8 image: width = max_cols * max_rows, height = atlas_count
-	# R = frame count (1 = not animated)
-	# G = animation columns (frames per row)
-	# B = animation speed (scaled: value * 10 = actual speed, so 25.5 max)
-	# A = reserved
-	var width := max_cols * max_rows
-	var height := atlas_count
-
-	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
-
-	# Initialize all pixels to frame_count=1 (no animation)
-	# Using 1.0/255.0 for frame_count=1, columns=1, speed=0
-	image.fill(Color(1.0 / 255.0, 1.0 / 255.0, 0.0, 0.0))
-
-	# Fill in animation data for animated tiles
-	var anim_data := tile_set.get_animation_data()
-	for key: String in anim_data:
-		var parts: PackedStringArray = key.split(",")
-		var atlas_id := int(parts[0])
-		var tile_x := int(parts[1])
-		var tile_y := int(parts[2])
-
-		var info := tile_set.get_atlas_info(atlas_id)
-		var cols: int = info.columns
-
-		# Linear index for this tile position
-		var linear_idx := tile_y * cols + tile_x
-
-		var data: Dictionary = anim_data[key]
-		var frames: int = data.frames
-		var anim_columns: int = data.columns
-		var speed: float = data.speed
-
-		# Encode values (frame_count and columns as direct values, speed scaled)
-		var r := float(frames) / 255.0
-		var g := float(anim_columns) / 255.0
-		var b := speed / 25.5  # Scale so max readable speed is 25.5
-
-		image.set_pixel(linear_idx, atlas_id, Color(r, g, b, 0.0))
-
-	_animation_data_texture = ImageTexture.create_from_image(image)
-
-
 func _update_material() -> void:
 	# Tiled rendering takes priority if tile_set is assigned
 	if tile_set and tile_set.get_atlas_count() > 0:
@@ -343,19 +244,6 @@ func _update_material() -> void:
 			# Set atlas array texture
 			if _atlas_array_texture:
 				mat.set_shader_parameter("tile_atlas_array", _atlas_array_texture)
-
-			# Update and set animation data texture
-			_update_animation_data_texture()
-			if _animation_data_texture:
-				mat.set_shader_parameter("animation_data", _animation_data_texture)
-				# Calculate dimensions for shader
-				var max_cols := 1
-				var max_rows := 1
-				for i in tile_set.get_atlas_count():
-					var info := tile_set.get_atlas_info(i)
-					max_cols = maxi(max_cols, info.columns)
-					max_rows = maxi(max_rows, info.rows)
-				mat.set_shader_parameter("anim_data_size", Vector2i(max_cols * max_rows, tile_set.get_atlas_count()))
 
 			# Set per-atlas columns and rows arrays
 			var atlas_count := tile_set.get_atlas_count()
