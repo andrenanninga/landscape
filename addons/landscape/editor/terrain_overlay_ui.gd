@@ -50,6 +50,10 @@ const DEFAULT_PANEL_SIZE := Vector2(800.0, 700.0)
 @onready var _color_erase_button: Button = %ColorEraseButton
 @onready var _color_light_mode_button: Button = %ColorLightModeButton
 @onready var _color_blend_mode_selector: OptionButton = %ColorBlendModeSelector
+@onready var _all_faces_button: Button = %AllFacesButton
+@onready var _slot_row: HBoxContainer = %SlotRow
+@onready var _top_slot_button: Button = %TopSlotButton
+@onready var _side_slot_button: Button = %SideSlotButton
 
 var _wall_align_icons: Array[Texture2D] = []
 const WALL_ALIGN_TOOLTIPS: Array[String] = ["Wall alignment: World", "Wall alignment: Top", "Wall alignment: Bottom", "Wall alignment: Stretch"]
@@ -216,6 +220,16 @@ func _setup_paint_controls() -> void:
 	if _atlas_selector:
 		_atlas_selector.item_selected.connect(_on_atlas_selected)
 
+	if _all_faces_button:
+		_all_faces_button.icon = get_theme_icon("MaterialPreviewCube", "EditorIcons")
+		_all_faces_button.toggled.connect(_on_all_faces_toggled)
+
+	if _top_slot_button:
+		_top_slot_button.pressed.connect(_on_top_slot_pressed)
+
+	if _side_slot_button:
+		_side_slot_button.pressed.connect(_on_side_slot_pressed)
+
 
 func _setup_color_controls() -> void:
 	if _color_picker:
@@ -308,8 +322,30 @@ func _on_wall_align_cycle() -> void:
 		_update_wall_align_button()
 
 
-func _on_tile_selected(tile_index: int) -> void:
+func _on_all_faces_toggled(pressed: bool) -> void:
 	if terrain_editor:
+		terrain_editor.current_paint_all_faces = pressed
+
+
+func _on_top_slot_pressed() -> void:
+	if terrain_editor:
+		terrain_editor.current_tile_slot = 0
+
+
+func _on_side_slot_pressed() -> void:
+	if terrain_editor:
+		terrain_editor.current_tile_slot = 1
+
+
+func _on_tile_selected(tile_index: int) -> void:
+	if not terrain_editor:
+		return
+	if terrain_editor.current_paint_all_faces:
+		if terrain_editor.current_tile_slot == 0:
+			terrain_editor.current_paint_top_tile = tile_index
+		else:
+			terrain_editor.current_paint_side_tile = tile_index
+	else:
 		terrain_editor.current_paint_tile = tile_index
 
 
@@ -427,6 +463,10 @@ func _update_paint_controls() -> void:
 	if _random_button:
 		_random_button.button_pressed = terrain_editor.current_paint_random
 
+	if _all_faces_button:
+		_all_faces_button.button_pressed = terrain_editor.current_paint_all_faces
+
+	_update_slot_controls()
 	_update_wall_align_button()
 
 
@@ -444,7 +484,22 @@ func _update_wall_align_button() -> void:
 func _update_tile_selection() -> void:
 	if not terrain_editor or not _tile_palette:
 		return
-	_tile_palette.selected_tile = terrain_editor.current_paint_tile
+	if terrain_editor.current_paint_all_faces:
+		var active_tile: int = terrain_editor.current_paint_top_tile if terrain_editor.current_tile_slot == 0 else terrain_editor.current_paint_side_tile
+		_tile_palette.selected_tile = active_tile
+	else:
+		_tile_palette.selected_tile = terrain_editor.current_paint_tile
+
+
+func _update_slot_controls() -> void:
+	var all_faces_on: bool = terrain_editor != null and terrain_editor.current_paint_all_faces
+	if _slot_row:
+		_slot_row.visible = all_faces_on
+	if all_faces_on:
+		if _top_slot_button:
+			_top_slot_button.button_pressed = terrain_editor.current_tile_slot == 0
+		if _side_slot_button:
+			_side_slot_button.button_pressed = terrain_editor.current_tile_slot == 1
 
 
 func _update_tile_palette() -> void:

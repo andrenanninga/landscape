@@ -84,6 +84,32 @@ var current_paint_wall_align: TerrainData.WallAlign = TerrainData.WallAlign.WORL
 		if _paint_handler:
 			_paint_handler.update_preview()
 
+var current_paint_all_faces: bool = false:
+	set(value):
+		current_paint_all_faces = value
+		paint_state_changed.emit()
+		if _paint_handler:
+			_paint_handler.update_preview()
+
+var current_tile_slot: int = 0:
+	set(value):
+		current_tile_slot = value
+		paint_state_changed.emit()
+
+var current_paint_top_tile: int = 0:
+	set(value):
+		current_paint_top_tile = value
+		paint_state_changed.emit()
+		if _paint_handler:
+			_paint_handler.update_preview()
+
+var current_paint_side_tile: int = 0:
+	set(value):
+		current_paint_side_tile = value
+		paint_state_changed.emit()
+		if _paint_handler:
+			_paint_handler.update_preview()
+
 # Brush size (1 = 1x1, 2 = 2x2, 3 = 3x3, etc.)
 var brush_size: int = 1:
 	set(value):
@@ -552,16 +578,39 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = f
 
 	# Check if we hit a fence surface instead of a wall
 	# Fences extend upward from terrain top, walls extend downward
+	# Also check for backside fence painting (hitting fence from the opposite direction)
 	if _hovered_surface >= TerrainData.Surface.NORTH and _hovered_surface <= TerrainData.Surface.WEST:
 		var local_hit := _terrain.to_local(hit_pos)
 		var data := _terrain.terrain_data
 		var edge := _hovered_surface - 1  # NORTH=1 -> edge 0, etc.
+		var opposite_edge := (edge + 2) % 4  # NORTH<->SOUTH, EAST<->WEST
+
+		# Also get cell from non-adjusted position (for backside detection)
+		var original_cell := _terrain.world_to_cell(hit_pos)
+
+		# Check both front-facing fence and potential backside fence
+		var fence_edge := -1
+		var fence_cell := _hovered_cell
+
+		# First try: front-facing fence at adjusted cell
 		if data.has_fence(_hovered_cell.x, _hovered_cell.y, edge):
+			fence_edge = edge
+			fence_cell = _hovered_cell
+		# Second try: backside fence at adjusted cell (opposite edge)
+		elif data.has_fence(_hovered_cell.x, _hovered_cell.y, opposite_edge):
+			fence_edge = opposite_edge
+			fence_cell = _hovered_cell
+		# Third try: backside fence at original cell (opposite edge - when adjustment moved us to wrong cell)
+		elif original_cell != _hovered_cell and data.has_fence(original_cell.x, original_cell.y, opposite_edge):
+			fence_edge = opposite_edge
+			fence_cell = original_cell
+
+		if fence_edge >= 0:
 			# Get terrain top height at this edge
-			var top_corners := data.get_top_corners(_hovered_cell.x, _hovered_cell.y)
+			var top_corners := data.get_top_corners(fence_cell.x, fence_cell.y)
 			var left_corner: int
 			var right_corner: int
-			match edge:
+			match fence_edge:
 				0:  # NORTH
 					left_corner = TerrainData.Corner.NW
 					right_corner = TerrainData.Corner.NE
@@ -578,7 +627,8 @@ func _update_hover(camera: Camera3D, mouse_pos: Vector2, shift_pressed: bool = f
 			var top_height := (data.steps_to_world(top_corners[left_corner]) + data.steps_to_world(top_corners[right_corner])) / 2.0
 			# If hit is above the terrain top, it's a fence
 			if local_hit.y > top_height - 0.01:
-				_hovered_surface = [TerrainData.Surface.FENCE_NORTH, TerrainData.Surface.FENCE_EAST, TerrainData.Surface.FENCE_SOUTH, TerrainData.Surface.FENCE_WEST][edge]
+				_hovered_surface = [TerrainData.Surface.FENCE_NORTH, TerrainData.Surface.FENCE_EAST, TerrainData.Surface.FENCE_SOUTH, TerrainData.Surface.FENCE_WEST][fence_edge]
+				_hovered_cell = fence_cell
 
 	# Calculate position within cell to determine nearest corner (for all tools)
 	var local_pos := _terrain.to_local(hit_pos)
@@ -689,26 +739,42 @@ func _raycast_terrain(origin: Vector3, direction: Vector3) -> Dictionary:
 	if not _terrain or not _terrain.terrain_data:
 		return {}
 
+	# Find the current terrain's collision body
+	var body: StaticBody3D = null
+	for child in _terrain.get_children():
+		if child is StaticBody3D:
+			body = child
+			break
+
+	if not body:
+		return {}
+
+	# Temporarily move the current terrain's collision to a unique layer
+	# This ensures we only hit the current terrain, even with overlapping geometry
+	const TEMP_LAYER := 20
+	var original_layer := body.collision_layer
+	body.collision_layer = 1 << TEMP_LAYER
+
 	var space_state := _terrain.get_world_3d().direct_space_state
 	var end := origin + direction * 1000.0
 
 	var query := PhysicsRayQueryParameters3D.create(origin, end)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
+	query.collision_mask = 1 << TEMP_LAYER  # Only hit our temporary layer
 
 	var result := space_state.intersect_ray(query)
+
+	# Restore original collision layer
+	body.collision_layer = original_layer
+
 	if result.is_empty():
 		return {}
 
-	# Check if we hit the terrain
-	var collider := result.get("collider")
-	if collider and collider.get_parent() == _terrain:
-		return {
-			"position": result.get("position"),
-			"normal": result.get("normal", Vector3.UP)
-		}
-
-	return {}
+	return {
+		"position": result.get("position"),
+		"normal": result.get("normal", Vector3.UP)
+	}
 
 
 func _flip_diagonal_brush_area(data: TerrainData, center: Vector2i) -> void:

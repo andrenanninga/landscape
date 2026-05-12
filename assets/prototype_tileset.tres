@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="TerrainTileSet" format=3 uid="uid://bs814io3x12pv"]
+
+[ext_resource type="Script" uid="uid://cwd47d6i8r7k4" path="res://addons/landscape/resources/terrain_tile_set.gd" id="1_iuikh"]
+[ext_resource type="TileSet" uid="uid://dh8urcidkf01r" path="res://assets/prototype.tres" id="2_c8xp4"]
+
+[resource]
+script = ExtResource("1_iuikh")
+tileset = ExtResource("2_c8xp4")
+metadata/_custom_type_script = "uid://cwd47d6i8r7k4"

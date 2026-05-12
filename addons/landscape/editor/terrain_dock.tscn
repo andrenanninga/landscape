@@ -180,6 +180,34 @@ layout_mode = 2
 size_flags_horizontal = 3
 tooltip_text = "Select which atlas source to paint from"
 
+[node name="AllFacesSection" type="HBoxContainer" parent="VBoxContainer/PaintSection"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="AllFacesButton" type="Button" parent="VBoxContainer/PaintSection/AllFacesSection"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "All Faces: paint top and all four side faces in one stroke"
+text = "All Faces"
+
+[node name="TopSlotButton" type="Button" parent="VBoxContainer/PaintSection/AllFacesSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_pressed = true
+tooltip_text = "Top slot: palette selects the tile for the top face"
+text = "Top"
+
+[node name="SideSlotButton" type="Button" parent="VBoxContainer/PaintSection/AllFacesSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+tooltip_text = "Side slot: palette selects the tile for the four side faces"
+text = "Side"
+
 [node name="TileHeader" type="HBoxContainer" parent="VBoxContainer/PaintSection"]
 layout_mode = 2
 

@@ -63,6 +63,13 @@ custom_minimum_size = Vector2(36, 36)
 layout_mode = 2
 tooltip_text = "Wall alignment: World"
 
+[node name="AllFacesButton" type="Button" parent="PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+toggle_mode = true
+tooltip_text = "All Faces: paint top and all four side faces in one stroke"
+
 [node name="VSeparator1" type="VSeparator" parent="PaintPanel/MarginContainer/VBoxContainer/TransformRow"]
 layout_mode = 2
 
@@ -103,6 +110,29 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Select atlas source"
+
+[node name="SlotRow" type="HBoxContainer" parent="PaintPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TopSlotButton" type="Button" parent="PaintPanel/MarginContainer/VBoxContainer/SlotRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_pressed = true
+tooltip_text = "Top slot: palette selects the tile for the top face"
+text = "Top"
+
+[node name="SideSlotButton" type="Button" parent="PaintPanel/MarginContainer/VBoxContainer/SlotRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+tooltip_text = "Side slot: palette selects the tile for the four side faces"
+text = "Side"
 
 [node name="TilePalette" type="Control" parent="PaintPanel/MarginContainer/VBoxContainer"]
 unique_name_in_owner = true

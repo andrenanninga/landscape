@@ -115,13 +115,23 @@ func update_hover_preview() -> void:
 	if not data:
 		return
 
-	# Build hover preview for entire brush area
 	var hover_preview: Dictionary = {}
 	var brush_cells := _editor.get_brush_cells(_editor._hovered_cell, data, _editor._brush_corner)
 
-	for cell in brush_cells:
-		var key := "%d,%d,%d" % [cell.x, cell.y, _editor._hovered_surface]
-		hover_preview[key] = _get_paint_packed(cell, _editor._hovered_surface)
+	var surfaces: Array[TerrainData.Surface]
+	if _editor.current_paint_all_faces and _editor._hovered_surface < TerrainData.Surface.FENCE_NORTH:
+		surfaces = [
+			TerrainData.Surface.TOP,
+			TerrainData.Surface.NORTH, TerrainData.Surface.EAST,
+			TerrainData.Surface.SOUTH, TerrainData.Surface.WEST,
+		]
+	else:
+		surfaces = [_editor._hovered_surface]
+
+	for s in surfaces:
+		for cell in brush_cells:
+			var key := "%d,%d,%d" % [cell.x, cell.y, s]
+			hover_preview[key] = _get_paint_packed(cell, s)
 
 	_editor._terrain.set_tile_previews(hover_preview)
 
@@ -129,29 +139,36 @@ func update_hover_preview() -> void:
 func _build_paint_preview(data: TerrainData, center: Vector2i, surface: TerrainData.Surface) -> bool:
 	var brush_cells := _editor.get_brush_cells(center, data, _editor._brush_corner)
 
+	var surfaces: Array[TerrainData.Surface]
+	if _editor.current_paint_all_faces and surface < TerrainData.Surface.FENCE_NORTH:
+		surfaces = [
+			TerrainData.Surface.TOP,
+			TerrainData.Surface.NORTH, TerrainData.Surface.EAST,
+			TerrainData.Surface.SOUTH, TerrainData.Surface.WEST,
+		]
+	else:
+		surfaces = [surface]
+
 	var any_added := false
-	for cell in brush_cells:
-		var key := "%d,%d,%d" % [cell.x, cell.y, surface]
-		# Skip if already in preview buffer
-		if _editor._paint_preview_buffer.has(key):
-			continue
-
-		# Handle fence surfaces differently
-		var old_packed: int
-		if surface >= TerrainData.Surface.FENCE_NORTH:
-			var edge := surface - TerrainData.Surface.FENCE_NORTH
-			# Skip if no fence exists at this edge
-			if not data.has_fence(cell.x, cell.y, edge):
+	for s in surfaces:
+		for cell in brush_cells:
+			var key := "%d,%d,%d" % [cell.x, cell.y, s]
+			# Skip if already in preview buffer
+			if _editor._paint_preview_buffer.has(key):
 				continue
-			old_packed = data.get_fence_tile_packed(cell.x, cell.y, edge)
-		else:
-			old_packed = data.get_tile_packed(cell.x, cell.y, surface)
 
-		# Store original value for undo
-		_editor._paint_original_values[key] = old_packed
-		# Add to preview buffer with potentially random transform
-		_editor._paint_preview_buffer[key] = _get_paint_packed(cell, surface)
-		any_added = true
+			var old_packed: int
+			if s >= TerrainData.Surface.FENCE_NORTH:
+				var edge := s - TerrainData.Surface.FENCE_NORTH
+				if not data.has_fence(cell.x, cell.y, edge):
+					continue
+				old_packed = data.get_fence_tile_packed(cell.x, cell.y, edge)
+			else:
+				old_packed = data.get_tile_packed(cell.x, cell.y, s)
+
+			_editor._paint_original_values[key] = old_packed
+			_editor._paint_preview_buffer[key] = _get_paint_packed(cell, s)
+			any_added = true
 
 	return any_added or brush_cells.size() > 0
 
@@ -160,6 +177,12 @@ func _get_paint_packed(cell: Vector2i, surface: TerrainData.Surface) -> int:
 	# Erase mode: return special "no tile" value
 	if _editor.current_paint_erase:
 		return TerrainData.ERASED_TILE_INDEX
+
+	var tile_index: int
+	if _editor.current_paint_all_faces:
+		tile_index = _editor.current_paint_top_tile if surface == TerrainData.Surface.TOP else _editor.current_paint_side_tile
+	else:
+		tile_index = _editor.current_paint_tile
 
 	if _editor.current_paint_random:
 		# Use cell position and surface as seed for deterministic randomness
@@ -170,9 +193,9 @@ func _get_paint_packed(cell: Vector2i, surface: TerrainData.Surface) -> int:
 		var rotation := rng.randi_range(0, 3) as TerrainData.Rotation
 		var flip_h := rng.randi_range(0, 1) == 1
 		var flip_v := rng.randi_range(0, 1) == 1
-		return TerrainData.pack_tile(_editor.current_paint_tile, rotation, flip_h, flip_v, _editor.current_paint_wall_align)
+		return TerrainData.pack_tile(tile_index, rotation, flip_h, flip_v, _editor.current_paint_wall_align)
 	else:
-		return TerrainData.pack_tile(_editor.current_paint_tile, _editor.current_paint_rotation, _editor.current_paint_flip_h, _editor.current_paint_flip_v, _editor.current_paint_wall_align)
+		return TerrainData.pack_tile(tile_index, _editor.current_paint_rotation, _editor.current_paint_flip_h, _editor.current_paint_flip_v, _editor.current_paint_wall_align)
 
 
 func pick_tile_at_hover() -> bool:
@@ -194,7 +217,13 @@ func pick_tile_at_hover() -> bool:
 	var tile_info := TerrainData.unpack_tile(packed)
 
 	# Set current paint state to match the picked tile
-	_editor.current_paint_tile = tile_info.tile_index
+	if _editor.current_paint_all_faces:
+		if _editor.current_tile_slot == 0:
+			_editor.current_paint_top_tile = tile_info.tile_index
+		else:
+			_editor.current_paint_side_tile = tile_info.tile_index
+	else:
+		_editor.current_paint_tile = tile_info.tile_index
 	_editor.current_paint_rotation = tile_info.rotation as TerrainData.Rotation
 	_editor.current_paint_flip_h = tile_info.flip_h
 	_editor.current_paint_flip_v = tile_info.flip_v

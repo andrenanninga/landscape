@@ -37,6 +37,10 @@ var _current_mode: int = 0
 @onready var _zoom_in_button: Button = %ZoomInButton
 @onready var _zoom_out_button: Button = %ZoomOutButton
 @onready var _spacer: Control = %Spacer
+@onready var _all_faces_section: HBoxContainer = %AllFacesSection
+@onready var _all_faces_button: Button = %AllFacesButton
+@onready var _top_slot_button: Button = %TopSlotButton
+@onready var _side_slot_button: Button = %SideSlotButton
 
 
 func _ready() -> void:
@@ -123,6 +127,15 @@ func _setup_paint_controls() -> void:
 	if _zoom_out_button:
 		_zoom_out_button.pressed.connect(_on_zoom_out)
 
+	if _all_faces_button:
+		_all_faces_button.toggled.connect(_on_all_faces_toggled)
+
+	if _top_slot_button:
+		_top_slot_button.pressed.connect(_on_top_slot_pressed)
+
+	if _side_slot_button:
+		_side_slot_button.pressed.connect(_on_side_slot_pressed)
+
 
 func _on_tool_button_pressed(tool: TerrainEditor.Tool) -> void:
 	if terrain_editor:
@@ -178,8 +191,30 @@ func _on_wall_align_selected(index: int) -> void:
 		terrain_editor.current_paint_wall_align = index as TerrainData.WallAlign
 
 
-func _on_tile_selected(tile_index: int) -> void:
+func _on_all_faces_toggled(pressed: bool) -> void:
 	if terrain_editor:
+		terrain_editor.current_paint_all_faces = pressed
+
+
+func _on_top_slot_pressed() -> void:
+	if terrain_editor:
+		terrain_editor.current_tile_slot = 0
+
+
+func _on_side_slot_pressed() -> void:
+	if terrain_editor:
+		terrain_editor.current_tile_slot = 1
+
+
+func _on_tile_selected(tile_index: int) -> void:
+	if not terrain_editor:
+		return
+	if terrain_editor.current_paint_all_faces:
+		if terrain_editor.current_tile_slot == 0:
+			terrain_editor.current_paint_top_tile = tile_index
+		else:
+			terrain_editor.current_paint_side_tile = tile_index
+	else:
 		terrain_editor.current_paint_tile = tile_index
 
 
@@ -212,11 +247,32 @@ func _update_paint_controls() -> void:
 	if _wall_align_selector:
 		_wall_align_selector.selected = terrain_editor.current_paint_wall_align
 
+	if _all_faces_button:
+		_all_faces_button.button_pressed = terrain_editor.current_paint_all_faces
+
+	_update_slot_controls()
+
+
+func _update_slot_controls() -> void:
+	var all_faces_on: bool = terrain_editor != null and terrain_editor.current_paint_all_faces
+	if _top_slot_button:
+		_top_slot_button.visible = all_faces_on
+		if all_faces_on:
+			_top_slot_button.button_pressed = terrain_editor.current_tile_slot == 0
+	if _side_slot_button:
+		_side_slot_button.visible = all_faces_on
+		if all_faces_on:
+			_side_slot_button.button_pressed = terrain_editor.current_tile_slot == 1
+
 
 func _update_tile_selection() -> void:
 	if not terrain_editor or not _tile_palette:
 		return
-	_tile_palette.selected_tile = terrain_editor.current_paint_tile
+	if terrain_editor.current_paint_all_faces:
+		var active_tile: int = terrain_editor.current_paint_top_tile if terrain_editor.current_tile_slot == 0 else terrain_editor.current_paint_side_tile
+		_tile_palette.selected_tile = active_tile
+	else:
+		_tile_palette.selected_tile = terrain_editor.current_paint_tile
 
 
 func _on_zoom_in() -> void:
