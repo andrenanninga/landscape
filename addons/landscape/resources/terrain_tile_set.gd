@@ -34,6 +34,9 @@ var _tile_uv_rects: Array[Rect2] = []
 # Per global tile index: Vector3i(atlas x, atlas y, atlas index)
 var _tile_locations: Array[Vector3i] = []
 
+# Global tile index -> {frames, columns, duration, stride, random_start} for animated tiles only
+var _tile_animations: Dictionary = {}
+
 
 # Re-reads the TileSet's sources. Call after the TileSet itself was edited; this resource
 # cannot listen to `tileset.changed` on its own because a RefCounted script object has no
@@ -47,6 +50,7 @@ func refresh() -> void:
 func _rebuild_tile_data() -> void:
 	_tile_uv_rects.clear()
 	_tile_locations.clear()
+	_tile_animations.clear()
 	_atlas_info.clear()
 
 	if not tileset:
@@ -85,9 +89,34 @@ func _rebuild_tile_data() -> void:
 		})
 
 		for coords in valid_tiles:
+			var frames := atlas_source.get_tile_animation_frames_count(coords)
+			if frames > 1:
+				_tile_animations[_tile_locations.size()] = _read_animation(atlas_source, coords, frames)
+
 			var pixel_rect := Rect2(Vector2(coords * tile_sz), Vector2(tile_sz))
 			_tile_uv_rects.append(Rect2(pixel_rect.position / tex_size, pixel_rect.size / tex_size))
 			_tile_locations.append(Vector3i(coords.x, coords.y, atlas_idx))
+
+
+# Frames are spaced evenly over the whole cycle, so per-frame durations only affect its length.
+# `stride` is the atlas cell step between frames (tile size plus separation).
+func _read_animation(atlas_source: TileSetAtlasSource, coords: Vector2i, frames: int) -> Dictionary:
+	var total_duration := 0.0
+	for frame in frames:
+		total_duration += atlas_source.get_tile_animation_frame_duration(coords, frame)
+	var speed := maxf(atlas_source.get_tile_animation_speed(coords), 0.001)
+
+	var columns := atlas_source.get_tile_animation_columns(coords)
+	var stride := atlas_source.get_tile_size_in_atlas(coords) + atlas_source.get_tile_animation_separation(coords)
+	var mode := atlas_source.get_tile_animation_mode(coords)
+
+	return {
+		"frames": frames,
+		"columns": columns if columns > 0 else frames,
+		"duration": total_duration / speed,
+		"stride": stride,
+		"random_start": mode == TileSetAtlasSource.TILE_ANIMATION_MODE_RANDOM_START_TIMES,
+	}
 
 
 func get_tile_count() -> int:
@@ -105,6 +134,11 @@ func get_tile_location(tile_index: int) -> Vector3i:
 	if tile_index < 0 or tile_index >= _tile_locations.size():
 		return Vector3i.ZERO
 	return _tile_locations[tile_index]
+
+
+# {frames, columns, duration (seconds per cycle), stride, random_start}; empty for static tiles
+func get_tile_animation(tile_index: int) -> Dictionary:
+	return _tile_animations.get(tile_index, {})
 
 
 func get_atlas_count() -> int:

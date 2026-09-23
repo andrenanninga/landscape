@@ -18,6 +18,12 @@ const SURFACES_PER_CELL := 9
 const ERASED_MARKER := 255
 const MAX_ATLAS_COORD := 254
 
+# Animation table layout: one RGBAF layer per atlas, one pixel per atlas tile.
+# R = frame count (< 2 is static), G = frame columns, B = cycle duration in seconds,
+# A = stride_x + stride_y * ANIM_STRIDE_Y_SCALE + ANIM_RANDOM_START_FLAG for random start times.
+const ANIM_STRIDE_Y_SCALE := 16
+const ANIM_RANDOM_START_FLAG := 256
+
 const COLLISION_NODE_NAME := "TerrainCollision"
 
 @export var terrain_data: TerrainData:
@@ -164,10 +170,12 @@ func _update_material() -> void:
 
 	var columns: Array[int] = []
 	var rows: Array[int] = []
+	var table_size := Vector2i.ONE
 	for i in atlas_count:
 		var info := tile_set.get_atlas_info(i)
 		columns.append(info.columns)
 		rows.append(info.rows)
+		table_size = table_size.max(Vector2i(info.columns, info.rows))
 
 	var mat := ShaderMaterial.new()
 	mat.shader = TILED_SHADER
@@ -175,6 +183,8 @@ func _update_material() -> void:
 	mat.set_shader_parameter("atlas_columns", columns)
 	mat.set_shader_parameter("atlas_rows", rows)
 	mat.set_shader_parameter("atlas_count", atlas_count)
+	mat.set_shader_parameter("tile_animations", _build_animation_table(atlas_count, table_size))
+	mat.set_shader_parameter("animation_table_size", table_size)
 	mat.set_shader_parameter("roughness", tile_set.roughness)
 	mat.set_shader_parameter("metallic", tile_set.metallic)
 	material_override = mat
@@ -233,6 +243,39 @@ func _build_atlas_array(atlas_count: int) -> Texture2DArray:
 		push_warning("LandscapeTerrain: failed to create Texture2DArray from atlas images: %d" % err)
 		return null
 	return array_texture
+
+
+# Animation settings of every atlas tile, addressed by atlas coordinates (see ANIM_* above).
+# All layers share the size of the largest atlas grid.
+func _build_animation_table(atlas_count: int, table_size: Vector2i) -> Texture2DArray:
+	var images: Array[Image] = []
+
+	for atlas_idx in atlas_count:
+		var info := tile_set.get_atlas_info(atlas_idx)
+		var floats := PackedFloat32Array()
+		floats.resize(table_size.x * table_size.y * 4)
+
+		for local_index in info.tile_count:
+			var anim := tile_set.get_tile_animation(info.start_index + local_index)
+			var coords: Vector2i = info.tiles[local_index]
+			if anim.is_empty() or coords.x >= table_size.x or coords.y >= table_size.y:
+				continue
+
+			var stride: Vector2i = anim.stride
+			var offset := (coords.y * table_size.x + coords.x) * 4
+			floats[offset] = anim.frames
+			floats[offset + 1] = anim.columns
+			floats[offset + 2] = anim.duration
+			floats[offset + 3] = stride.x + stride.y * ANIM_STRIDE_Y_SCALE + (ANIM_RANDOM_START_FLAG if anim.random_start else 0)
+
+		images.append(Image.create_from_data(table_size.x, table_size.y, false, Image.FORMAT_RGBAF, floats.to_byte_array()))
+
+	var table := Texture2DArray.new()
+	var err := table.create_from_images(images)
+	if err != OK:
+		push_warning("LandscapeTerrain: failed to create animation table: %d" % err)
+		return null
+	return table
 
 
 func _update_tile_data_texture() -> void:

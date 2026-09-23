@@ -8,6 +8,12 @@ uniform sampler2DArray tile_atlas_array : source_color, filter_nearest, repeat_d
 // 4-5 wall align), A = atlas index. (255, 255, *, 255) marks an erased face.
 uniform sampler2D tile_data : filter_nearest, repeat_disable;
 
+// Per atlas tile animation, one layer per atlas, addressed by atlas coordinates:
+// R = frame count (< 2 is static), G = frame columns, B = cycle duration in seconds,
+// A = stride_x + stride_y * 16 + 256 for random start times.
+uniform sampler2DArray tile_animations : filter_nearest, repeat_disable;
+uniform ivec2 animation_table_size = ivec2(1, 1);
+
 uniform ivec2 grid_size = ivec2(8, 8);
 uniform float cell_size = 1.0;
 
@@ -79,6 +85,36 @@ TileInfo get_tile_data(ivec2 cell, int surface) {
 	info.wall_align = (flags >> 4) & 3;
 	info.erased = info.atlas_id == ERASED_MARKER && info.tile_x == ERASED_MARKER && info.tile_y == ERASED_MARKER;
 	return info;
+}
+
+// Moves the tile coordinates to the frame that is showing now. Frames are evenly spaced
+// over the cycle; with random start times each face gets its own phase.
+TileInfo animate_tile(TileInfo tile, ivec2 cell, int surface) {
+	vec2 table_uv = (vec2(float(tile.tile_x), float(tile.tile_y)) + 0.5) / vec2(animation_table_size);
+	vec4 anim = texture(tile_animations, vec3(table_uv, float(tile.atlas_id)));
+
+	int frames = int(anim.r);
+	float duration = anim.b;
+	if (frames < 2 || duration <= 0.0) {
+		return tile;
+	}
+
+	int columns = max(int(anim.g), 1);
+	int packed = int(anim.a);
+	int stride_x = packed & 15;
+	int stride_y = (packed >> 4) & 15;
+	bool random_start = (packed & 256) != 0;
+
+	float phase = 0.0;
+	if (random_start) {
+		vec3 seed = vec3(float(cell.x), float(cell.y), float(surface));
+		phase = fract(sin(dot(seed, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+	}
+
+	int frame = min(int(fract(TIME / duration + phase) * float(frames)), frames - 1);
+	tile.tile_x += (frame % columns) * stride_x;
+	tile.tile_y += (frame / columns) * stride_y;
+	return tile;
 }
 
 // Flip, then rotate clockwise in quarter turns
@@ -160,6 +196,7 @@ void fragment() {
 	if (tile.erased) {
 		discard;
 	}
+	tile = animate_tile(tile, cell, data_surface);
 
 	vec2 local_uv;
 	if (surface == SURFACE_TOP || surface == SURFACE_FLOOR) {

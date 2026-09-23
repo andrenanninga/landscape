@@ -106,6 +106,19 @@ Each vertex carries the surface type in `COLOR.a` (0 top, 1-4 walls N/E/S/W, 5 f
 
 Paint previews are written over this texture without touching `TerrainData`. The texture is refreshed on every data change; the material and the `Texture2DArray` of atlas images are only rebuilt when the tile set changes.
 
+### Animation table
+
+Tile animation is a property of the atlas tile, not the cell, so it lives in a separate `Texture2DArray` with one RGBAF layer per atlas and one pixel per atlas tile, addressed by atlas coordinates. All layers share the size of the largest atlas grid.
+
+| Channel | Content |
+|---|---|
+| R | Frame count; below 2 the tile is static |
+| G | Frame columns (`0` in the `TileSet` is resolved to the frame count) |
+| B | Cycle duration in seconds: the summed frame durations divided by speed |
+| A | `stride_x + stride_y * 16`, plus `256` for random start times; the stride is the tile size in atlas cells plus separation |
+
+The shader looks up the resolved tile in this table and advances the atlas coordinates by `frame % columns * stride_x` and `frame / columns * stride_y`, with `frame` derived from `TIME`. Frames are spaced evenly over the cycle. Random start times hash the cell and surface into a phase offset. The table is rebuilt together with the material, only when the tile set changes.
+
 ### terrain_tiled.gdshader
 
 Samples the atlas array layer for the surface's tile. UVs come from the local position: XZ for top and floor, the edge axis and Y for walls. Wall alignment selects the vertical origin (world Y, wall top, wall bottom, or stretched over the wall height). Erased faces are discarded; alpha uses a 0.5 scissor threshold. The floor always shows tile (0, 0) of atlas 0.
@@ -145,6 +158,6 @@ Tools: Sculpt, Paint, Color, Flip Diagonal, Flatten, Mountain, Fence. Brush size
 
 ### TerrainTileSet
 - `tileset`, `roughness`, `metallic`
-- `get_tile_count()`, `get_tile_uv_rect()`, `get_tile_location()`
+- `get_tile_count()`, `get_tile_uv_rect()`, `get_tile_location()`, `get_tile_animation()`
 - `get_atlas_count()`, `get_atlas_info()`, `get_atlas_for_tile()`, `get_local_tile_index()`, `get_global_tile_index()`
 - `refresh()`

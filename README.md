@@ -178,6 +178,7 @@ A slider below the tool icons controls the brush size from **1×1** to **9×9** 
 Assign a `TerrainTileSet` to the `tile_set` property to enable atlas-based PBR texturing. The resource wraps one or more Godot `TileSet` sources and supports:
 
 - Multiple atlases (up to 8), each with independent tile dimensions. All atlas textures are packed into one texture array, so smaller atlases are upscaled to the largest one; keep atlas sizes at integer ratios of each other for crisp pixels.
+- **Animated tiles** — frame count, columns, separation, speed, frame durations and the random-start mode are read from the `TileSet` atlas tile. Frames are spaced evenly over the cycle, so per-frame durations only change its total length. The editor viewport only redraws on changes by default; enable *Update Continuously* in the editor settings to watch animations play while editing.
 - **PBR material settings** — `roughness` (default 0.8) and `metallic` (default 0.0).
 - Transparent tiles: pixels with alpha below 0.5 are cut out.
 - Nearest-neighbour filtering for a pixel-art look.
