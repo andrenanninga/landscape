@@ -6,7 +6,7 @@ A tile-based terrain editor for Godot 4 that lets you sculpt, paint, and detail 
 
 ## Overview
 
-Landscape adds a `LandscapeTerrain` node to Godot that represents a grid of cells. Each cell has a top surface, optional floor surface, up to four wall surfaces (where adjacent cells differ in height), and optional fence structures. The entire terrain is a single mesh, with trimesh collision generated automatically.
+Landscape adds a `LandscapeTerrain` node to Godot that represents a grid of cells. Each cell has a top surface, optional floor surface, up to four wall surfaces (where adjacent cells differ in height), and optional fence structures. The entire terrain is a single mesh, with trimesh collision generated automatically. The mesh, material and collision are rebuilt from the terrain data when the scene loads and are not stored in the scene file.
 
 When a `LandscapeTerrain` node is selected, an overlay toolbar appears in the bottom-right corner of the 3D viewport with all editing tools.
 
@@ -57,7 +57,7 @@ Raise and lower terrain corners and cells by clicking and dragging in the viewpo
 
 **Editing the floor surface**
 
-Each cell has an independent floor. Click below the midpoint of a wall face, or view the terrain from beneath, to edit the floor instead of the top. The floor cannot exceed the top surface height, and lowering the top automatically pushes the floor down to match.
+Each cell has an independent floor. Click below the midpoint of a wall face, or view the terrain from beneath, to edit the floor instead of the top. The floor cannot exceed the top surface height; lowering the top with any tool (Sculpt, Flatten or Mountain) pushes the floor down to match.
 
 ---
 
@@ -105,7 +105,6 @@ The palette panel opens alongside the viewport. It is resizable — drag the han
 | **Shift+Z** | Rotate 90° counter-clockwise |
 | **X** | Flip horizontally |
 | **Y** | Flip vertically |
-| Rotation label | Shows the current angle: 0°, 90°, 180°, or 270° |
 
 #### Paint Modes
 
@@ -139,7 +138,7 @@ A real-time shader preview shows exactly how the tile will look before you click
 
 Paint vertex colors onto terrain corners for lighting effects, shadows, and decoration.
 
-- **Color picker** — click the color swatch to choose a color with full alpha support.
+- **Color picker** — choose the color to paint; only the RGB channels tint the terrain.
 - **Erase** — remove color, resetting corners to white.
 - **Light mode** — paint with a radial falloff so the center of the brush receives full intensity and the edges fade off smoothly. Available blend modes:
   - **Screen** — soft lighting
@@ -168,7 +167,7 @@ Create thin vertical structures along cell edges.
 
 ## Brush Size
 
-A slider below the tool icons controls the brush size from **1×1** to **9×9** cells. Odd sizes center on the hovered cell; even sizes offset toward the nearest corner. Brush size applies to all tools except Flip Diagonal.
+A slider below the tool icons controls the brush size from **1×1** to **9×9** cells. Odd sizes center on the hovered cell; even sizes anchor on the nearest corner. Brush size applies to all tools.
 
 ---
 
@@ -178,17 +177,17 @@ A slider below the tool icons controls the brush size from **1×1** to **9×9** 
 
 Assign a `TerrainTileSet` to the `tile_set` property to enable atlas-based PBR texturing. The resource wraps one or more Godot `TileSet` sources and supports:
 
-- Multiple atlases, each with independent tile dimensions.
-- **Animated tiles** — frame count, column layout, and playback speed taken from the underlying `TileSet`.
+- Multiple atlases (up to 8), each with independent tile dimensions. All atlas textures are packed into one texture array, so smaller atlases are upscaled to the largest one; keep atlas sizes at integer ratios of each other for crisp pixels.
 - **PBR material settings** — `roughness` (default 0.8) and `metallic` (default 0.0).
-- Transparent tiles with correct alpha blending.
+- Transparent tiles: pixels with alpha below 0.5 are cut out.
 - Nearest-neighbour filtering for a pixel-art look.
 
 ### Default Shader (no tile set)
 
 Without a tile set, the terrain renders with a flat unshaded shader that uses direction-based colors and a checkerboard pattern:
 
-- **Top** — dark soil brown
+- **Top** — grass green
+- **Floor** — dark soil brown
 - **Walls** — shaded dirt tones that vary by facing direction (north, south, east, west)
 - Vertex colors are applied as tinting on top of the base colors.
 
@@ -229,4 +228,3 @@ The 3D viewport overlay provides real-time visual feedback for every tool:
 | Mountain (slope) | Brown fill |
 | Fence | Edge and corner handles |
 
-A status bar in the panel shows the current cell coordinates, active corner or surface name, and height in world units while editing.

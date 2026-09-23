@@ -2,12 +2,12 @@
 class_name TerrainPreview
 extends RefCounted
 
-## Manages tile preview state for terrain editing.
-## Stores preview buffer and notifies terrain when updates are needed.
+## Holds tile overrides shown while painting, before they are committed to TerrainData.
+## Keys are Vector3i(x, z, surface); values are packed tiles (see TilePacking).
 
 signal preview_changed
 
-var _buffer: Dictionary = {}  # "x,z,surface" -> packed_tile_value
+var _buffer: Dictionary = {}
 
 
 func set_previews(previews: Dictionary) -> void:
@@ -28,11 +28,3 @@ func clear() -> void:
 
 func is_empty() -> bool:
 	return _buffer.is_empty()
-
-
-func has(key: String) -> bool:
-	return _buffer.has(key)
-
-
-func get_value(key: String) -> int:
-	return _buffer.get(key, 0)

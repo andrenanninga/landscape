@@ -9,8 +9,13 @@ const FlattenIcon = preload("res://addons/landscape/icons/flatten_tool.svg")
 const MountainIcon = preload("res://addons/landscape/icons/mountain_tool.svg")
 const FenceIcon = preload("res://addons/landscape/icons/fence_tool.svg")
 
-var terrain_editor = null:
+var terrain_editor: TerrainEditor:
 	set(value):
+		if terrain_editor:
+			terrain_editor.tool_changed.disconnect(_on_tool_changed)
+			terrain_editor.paint_state_changed.disconnect(_on_paint_state_changed)
+			terrain_editor.brush_size_changed.disconnect(_on_brush_size_changed)
+			terrain_editor.vertex_color_changed.disconnect(_on_vertex_color_changed)
 		terrain_editor = value
 		if terrain_editor:
 			terrain_editor.tool_changed.connect(_on_tool_changed)
@@ -18,7 +23,7 @@ var terrain_editor = null:
 			terrain_editor.brush_size_changed.connect(_on_brush_size_changed)
 			terrain_editor.vertex_color_changed.connect(_on_vertex_color_changed)
 
-var terrain = null:
+var terrain: LandscapeTerrain:
 	set(value):
 		terrain = value
 		_update_tile_palette()
@@ -72,8 +77,16 @@ func _ready() -> void:
 	if _tile_palette:
 		_tile_palette.tile_selected.connect(_on_tile_selected)
 
+	# The panels hang off the toolbar, so follow it whenever the layout settles or the viewport resizes
+	if _main_toolbar:
+		_main_toolbar.item_rect_changed.connect(_update_panels)
+	if _color_panel:
+		_color_panel.item_rect_changed.connect(_update_panels)
+	resized.connect(_update_panels)
+	_update_panels.call_deferred()
 
-func _process(_delta: float) -> void:
+
+func _update_panels() -> void:
 	_update_paint_panel()
 	_update_color_panel()
 
@@ -111,6 +124,7 @@ func _input(event: InputEvent) -> void:
 		var delta := _resize_drag_start - motion.global_position
 		_panel_size.x = maxf(_resize_size_start.x + delta.x, MIN_PANEL_WIDTH)
 		_panel_size.y = maxf(_resize_size_start.y + delta.y, MIN_PANEL_HEIGHT)
+		_update_paint_panel()
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
@@ -271,12 +285,14 @@ func _on_paint_button_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and mb.shift_pressed:
 			_panel_size = DEFAULT_PANEL_SIZE
+			_update_paint_panel()
 
 
 func _on_tool_changed(tool: TerrainEditor.Tool) -> void:
 	_update_button_states()
 	_update_paint_panel_visibility()
 	_update_color_panel_visibility()
+	_update_panels()
 
 
 func _on_paint_state_changed() -> void:
@@ -506,10 +522,9 @@ func _update_tile_palette() -> void:
 	if not _tile_palette:
 		return
 
-	var landscape := terrain as LandscapeTerrain
-	if landscape and landscape.tile_set:
-		_tile_palette.tile_set = landscape.tile_set
-		_update_atlas_selector(landscape.tile_set)
+	if terrain and terrain.tile_set:
+		_tile_palette.tile_set = terrain.tile_set
+		_update_atlas_selector(terrain.tile_set)
 	else:
 		_tile_palette.tile_set = null
 		_update_atlas_selector(null)
@@ -527,12 +542,10 @@ func _update_atlas_selector(tile_set: TerrainTileSet) -> void:
 
 	var atlas_count := tile_set.get_atlas_count()
 	for i in atlas_count:
-		var info := tile_set.get_atlas_info(i)
-		var label := "Atlas %d" % i
-		_atlas_selector.add_item(label, i)
+		_atlas_selector.add_item("Atlas %d" % i, i)
 
-	# Show selector if there are atlases
-	_atlas_selector.visible = atlas_count > 0
+	# A single atlas needs no selector
+	_atlas_selector.visible = atlas_count > 1
 
 	# Sync with tile palette selection
 	if _tile_palette and _atlas_selector.item_count > 0:

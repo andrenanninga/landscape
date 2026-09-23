@@ -4,12 +4,41 @@ extends RefCounted
 
 ## Handles paint tool operations for the terrain editor.
 ## Manages tile painting, preview, eyedropper, and transform operations.
+##
+## Preview and undo buffers are keyed by Vector3i(x, z, surface).
+
+const ALL_CELL_FACES: Array[TerrainData.Surface] = [
+	TerrainData.Surface.TOP,
+	TerrainData.Surface.NORTH,
+	TerrainData.Surface.EAST,
+	TerrainData.Surface.SOUTH,
+	TerrainData.Surface.WEST,
+]
 
 var _editor: TerrainEditor
 
 
 func _init(editor: TerrainEditor) -> void:
 	_editor = editor
+
+
+func start_drag(data: TerrainData, shift_pressed: bool) -> bool:
+	_editor._paint_preview_buffer.clear()
+	_editor._paint_original_values.clear()
+
+	if shift_pressed:
+		_editor._paint_surface_locked = true
+		_editor._paint_locked_surface = _editor._hovered_surface
+	var paint_surface := _editor._paint_locked_surface if _editor._paint_surface_locked else _editor._hovered_surface
+
+	if not _build_paint_preview(data, _editor._hovered_cell, paint_surface):
+		return false
+
+	_editor._is_paint_dragging = true
+	_editor._last_painted_cell = _editor._hovered_cell
+	_editor._last_painted_surface = paint_surface
+	_editor._terrain.set_tile_previews(_editor._paint_preview_buffer)
+	return true
 
 
 func update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
@@ -20,22 +49,16 @@ func update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 	if not data:
 		return
 
-	# Update hover position (this also updates _hovered_surface)
 	_editor._update_hover(camera, mouse_pos)
-
 	if _editor._hovered_cell.x < 0:
 		return
 
-	# When surface is locked, only paint on matching surface type
 	var paint_surface := _editor._paint_locked_surface if _editor._paint_surface_locked else _editor._hovered_surface
 	if _editor._paint_surface_locked and _editor._hovered_surface != _editor._paint_locked_surface:
 		return
-
-	# Only update preview if cell or surface changed
 	if _editor._hovered_cell == _editor._last_painted_cell and paint_surface == _editor._last_painted_surface:
 		return
 
-	# Add new cells to preview (accumulate)
 	_build_paint_preview(data, _editor._hovered_cell, paint_surface)
 	_editor._terrain.set_tile_previews(_editor._paint_preview_buffer)
 	_editor._last_painted_cell = _editor._hovered_cell
@@ -43,52 +66,23 @@ func update_drag(camera: Camera3D, mouse_pos: Vector2) -> void:
 
 
 func finish_drag() -> void:
-	if not _editor._terrain or _editor._paint_preview_buffer.is_empty():
-		_editor._is_paint_dragging = false
-		_editor._paint_surface_locked = false
-		_editor._last_painted_cell = Vector2i(-1, -1)
-		_editor._paint_preview_buffer.clear()
-		_editor._paint_original_values.clear()
+	var data := _editor._terrain.terrain_data if _editor._terrain else null
+	if not data or _editor._paint_preview_buffer.is_empty():
+		cancel_preview()
 		return
 
-	var data := _editor._terrain.terrain_data
-	if not data:
-		_editor._is_paint_dragging = false
-		_editor._paint_surface_locked = false
-		return
-
-	# Create undo/redo action from preview data
-	# Wrap in batch mode to avoid emitting data_changed for each tile
 	_editor.undo_redo.create_action("Paint Terrain Tiles")
 	_editor.undo_redo.add_do_method(data, "begin_batch")
 	_editor.undo_redo.add_undo_method(data, "begin_batch")
-	for key: String in _editor._paint_preview_buffer.keys():
-		var parts: PackedStringArray = key.split(",")
-		var x := int(parts[0])
-		var z := int(parts[1])
-		var surface := int(parts[2]) as TerrainData.Surface
-		var new_packed: int = _editor._paint_preview_buffer[key]
-		var old_packed: int = _editor._paint_original_values[key]
-
-		# Handle fence surfaces differently
-		if surface >= TerrainData.Surface.FENCE_NORTH:
-			var edge := surface - TerrainData.Surface.FENCE_NORTH
-			_editor.undo_redo.add_do_method(data, "set_fence_tile_packed", x, z, edge, new_packed)
-			_editor.undo_redo.add_undo_method(data, "set_fence_tile_packed", x, z, edge, old_packed)
-		else:
-			_editor.undo_redo.add_do_method(data, "set_tile_packed", x, z, surface, new_packed)
-			_editor.undo_redo.add_undo_method(data, "set_tile_packed", x, z, surface, old_packed)
+	for key: Vector3i in _editor._paint_preview_buffer:
+		var surface := key.z as TerrainData.Surface
+		_editor.undo_redo.add_do_method(data, "set_tile_packed", key.x, key.y, surface, _editor._paint_preview_buffer[key])
+		_editor.undo_redo.add_undo_method(data, "set_tile_packed", key.x, key.y, surface, _editor._paint_original_values[key])
 	_editor.undo_redo.add_do_method(data, "end_batch")
 	_editor.undo_redo.add_undo_method(data, "end_batch")
 	_editor.undo_redo.commit_action()
 
-	# Clear preview
-	_editor._terrain.clear_preview()
-	_editor._paint_preview_buffer.clear()
-	_editor._paint_original_values.clear()
-	_editor._is_paint_dragging = false
-	_editor._paint_surface_locked = false
-	_editor._last_painted_cell = Vector2i(-1, -1)
+	cancel_preview()
 
 
 func cancel_preview() -> void:
@@ -101,8 +95,9 @@ func cancel_preview() -> void:
 	_editor._last_painted_cell = Vector2i(-1, -1)
 
 
+# Refreshes the hover preview after a paint setting changed
 func update_preview() -> void:
-	if _editor.current_tool != TerrainEditor.Tool.PAINT or not _editor._terrain or _editor._hovered_cell.x < 0:
+	if _editor.current_tool != TerrainEditor.Tool.PAINT:
 		return
 	update_hover_preview()
 
@@ -116,88 +111,59 @@ func update_hover_preview() -> void:
 		return
 
 	var hover_preview: Dictionary = {}
-	var brush_cells := _editor.get_brush_cells(_editor._hovered_cell, data, _editor._brush_corner)
-
-	var surfaces: Array[TerrainData.Surface]
-	if _editor.current_paint_all_faces and _editor._hovered_surface < TerrainData.Surface.FENCE_NORTH:
-		surfaces = [
-			TerrainData.Surface.TOP,
-			TerrainData.Surface.NORTH, TerrainData.Surface.EAST,
-			TerrainData.Surface.SOUTH, TerrainData.Surface.WEST,
-		]
-	else:
-		surfaces = [_editor._hovered_surface]
-
-	for s in surfaces:
-		for cell in brush_cells:
-			var key := "%d,%d,%d" % [cell.x, cell.y, s]
-			hover_preview[key] = _get_paint_packed(cell, s)
+	for surface in _surfaces_to_paint(_editor._hovered_surface):
+		for cell in _editor.get_brush_cells(_editor._hovered_cell, data, _editor._brush_corner):
+			hover_preview[Vector3i(cell.x, cell.y, surface)] = _get_paint_packed(cell, surface)
 
 	_editor._terrain.set_tile_previews(hover_preview)
 
 
+# In all-faces mode a stroke on a cell face covers the top and all four walls
+func _surfaces_to_paint(surface: TerrainData.Surface) -> Array[TerrainData.Surface]:
+	if _editor.current_paint_all_faces and not TerrainData.is_fence_surface(surface):
+		return ALL_CELL_FACES
+	return [surface]
+
+
+# Adds the brush area around center to the drag preview. Returns false if nothing is under the brush.
 func _build_paint_preview(data: TerrainData, center: Vector2i, surface: TerrainData.Surface) -> bool:
 	var brush_cells := _editor.get_brush_cells(center, data, _editor._brush_corner)
 
-	var surfaces: Array[TerrainData.Surface]
-	if _editor.current_paint_all_faces and surface < TerrainData.Surface.FENCE_NORTH:
-		surfaces = [
-			TerrainData.Surface.TOP,
-			TerrainData.Surface.NORTH, TerrainData.Surface.EAST,
-			TerrainData.Surface.SOUTH, TerrainData.Surface.WEST,
-		]
-	else:
-		surfaces = [surface]
-
-	var any_added := false
-	for s in surfaces:
+	for s in _surfaces_to_paint(surface):
 		for cell in brush_cells:
-			var key := "%d,%d,%d" % [cell.x, cell.y, s]
-			# Skip if already in preview buffer
+			var key := Vector3i(cell.x, cell.y, s)
 			if _editor._paint_preview_buffer.has(key):
 				continue
+			if TerrainData.is_fence_surface(s) and not data.has_fence(cell.x, cell.y, TerrainData.fence_edge_from_surface(s)):
+				continue
 
-			var old_packed: int
-			if s >= TerrainData.Surface.FENCE_NORTH:
-				var edge := s - TerrainData.Surface.FENCE_NORTH
-				if not data.has_fence(cell.x, cell.y, edge):
-					continue
-				old_packed = data.get_fence_tile_packed(cell.x, cell.y, edge)
-			else:
-				old_packed = data.get_tile_packed(cell.x, cell.y, s)
-
-			_editor._paint_original_values[key] = old_packed
+			_editor._paint_original_values[key] = data.get_tile_packed(cell.x, cell.y, s)
 			_editor._paint_preview_buffer[key] = _get_paint_packed(cell, s)
-			any_added = true
 
-	return any_added or brush_cells.size() > 0
+	return not brush_cells.is_empty()
 
 
 func _get_paint_packed(cell: Vector2i, surface: TerrainData.Surface) -> int:
-	# Erase mode: return special "no tile" value
 	if _editor.current_paint_erase:
 		return TerrainData.ERASED_TILE_INDEX
 
-	var tile_index: int
+	var tile_index := _editor.current_paint_tile
 	if _editor.current_paint_all_faces:
 		tile_index = _editor.current_paint_top_tile if surface == TerrainData.Surface.TOP else _editor.current_paint_side_tile
-	else:
-		tile_index = _editor.current_paint_tile
 
-	if _editor.current_paint_random:
-		# Use cell position and surface as seed for deterministic randomness
-		# This ensures the same cell shows the same random transform during hover
-		var seed_value := cell.x * 73856093 ^ cell.y * 19349663 ^ surface * 83492791
-		var rng := RandomNumberGenerator.new()
-		rng.seed = seed_value
-		var rotation := rng.randi_range(0, 3) as TerrainData.Rotation
-		var flip_h := rng.randi_range(0, 1) == 1
-		var flip_v := rng.randi_range(0, 1) == 1
-		return TerrainData.pack_tile(tile_index, rotation, flip_h, flip_v, _editor.current_paint_wall_align)
-	else:
+	if not _editor.current_paint_random:
 		return TerrainData.pack_tile(tile_index, _editor.current_paint_rotation, _editor.current_paint_flip_h, _editor.current_paint_flip_v, _editor.current_paint_wall_align)
 
+	# Seed from the cell and surface so the hover preview matches the painted result
+	var rng := RandomNumberGenerator.new()
+	rng.seed = cell.x * 73856093 ^ cell.y * 19349663 ^ surface * 83492791
+	var rotation := rng.randi_range(0, 3) as TerrainData.Rotation
+	var flip_h := rng.randi_range(0, 1) == 1
+	var flip_v := rng.randi_range(0, 1) == 1
+	return TerrainData.pack_tile(tile_index, rotation, flip_h, flip_v, _editor.current_paint_wall_align)
 
+
+# Eyedropper: adopt the tile settings of the hovered surface
 func pick_tile_at_hover() -> bool:
 	if _editor._hovered_cell.x < 0 or not _editor._terrain:
 		return false
@@ -206,17 +172,9 @@ func pick_tile_at_hover() -> bool:
 	if not data:
 		return false
 
-	# Get tile data from the hovered cell and surface
-	var packed: int
-	if _editor._hovered_surface >= TerrainData.Surface.FENCE_NORTH:
-		var edge := _editor._hovered_surface - TerrainData.Surface.FENCE_NORTH
-		packed = data.get_fence_tile_packed(_editor._hovered_cell.x, _editor._hovered_cell.y, edge)
-	else:
-		packed = data.get_tile_packed(_editor._hovered_cell.x, _editor._hovered_cell.y, _editor._hovered_surface)
+	var surface := _editor._hovered_surface
+	var tile_info := TerrainData.unpack_tile(data.get_tile_packed(_editor._hovered_cell.x, _editor._hovered_cell.y, surface))
 
-	var tile_info := TerrainData.unpack_tile(packed)
-
-	# Set current paint state to match the picked tile
 	if _editor.current_paint_all_faces:
 		if _editor.current_tile_slot == 0:
 			_editor.current_paint_top_tile = tile_info.tile_index
@@ -227,12 +185,14 @@ func pick_tile_at_hover() -> bool:
 	_editor.current_paint_rotation = tile_info.rotation as TerrainData.Rotation
 	_editor.current_paint_flip_h = tile_info.flip_h
 	_editor.current_paint_flip_v = tile_info.flip_v
-	_editor.current_paint_wall_align = tile_info.wall_align as TerrainData.WallAlign
+
+	# Top faces carry no alignment, so keep the current setting when picking from one
+	if surface != TerrainData.Surface.TOP:
+		_editor.current_paint_wall_align = tile_info.wall_align as TerrainData.WallAlign
 
 	return true
 
 
-# Helper functions for paint tool rotation/flip
 func rotate_cw() -> void:
 	_editor.current_paint_rotation = ((_editor.current_paint_rotation + 1) % 4) as TerrainData.Rotation
 
