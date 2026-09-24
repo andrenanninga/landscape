@@ -55,8 +55,30 @@ func draw(overlay: Control, terrain: LandscapeTerrain) -> void:
 		TerrainEditor.Tool.FENCE:
 			_draw_fence_overlay(overlay, camera, terrain, data)
 
+		TerrainEditor.Tool.COLOR:
+			_draw_color(overlay, camera, terrain, data, display_cell, brush_cells)
+
 		_:
 			_draw_sculpt(overlay, camera, terrain, data, display_cell, brush_cells)
+
+
+# Color tool: walls get their own highlight, top and floor faces share the sculpt highlight
+func _draw_color(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, display_cell: Vector2i, brush_cells: Array[Vector2i]) -> void:
+	var surface := _editor._hovered_surface
+	if surface < TerrainData.Surface.NORTH or surface > TerrainData.Surface.WEST:
+		_draw_sculpt(overlay, camera, terrain, data, display_cell, brush_cells)
+		return
+
+	var color := Color.GREEN if _editor._is_color_dragging else Color.YELLOW
+
+	if _editor.brush_size == 1 and _editor._hover_mode != TerrainEditor.HoverMode.CELL and _editor._hovered_corner >= 0:
+		var edge: int = surface - TerrainData.Surface.NORTH
+		var wall := data.get_surface_world_corners(display_cell.x, display_cell.y, surface)
+		_draw_corner_highlight(overlay, camera, terrain, wall, _editor._color_handler.hovered_wall_vertex(edge), color)
+		return
+
+	for cell in brush_cells:
+		_draw_quad(overlay, camera, terrain, data.get_surface_world_corners(cell.x, cell.y, surface), color, FILL_ALPHA)
 
 
 func _draw_mountain(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, brush_cells: Array[Vector2i]) -> void:
@@ -91,7 +113,8 @@ func _draw_sculpt(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain,
 
 	if display_mode != TerrainEditor.HoverMode.CELL and display_corner >= 0:
 		var is_floor_corner := display_mode == TerrainEditor.HoverMode.FLOOR_CORNER
-		_draw_corner_highlight(overlay, camera, terrain, data, display_cell, display_corner, color, is_floor_corner)
+		var face := data.get_floor_world_corners(display_cell.x, display_cell.y) if is_floor_corner else data.get_top_world_corners(display_cell.x, display_cell.y)
+		_draw_corner_highlight(overlay, camera, terrain, face, display_corner, color)
 		return
 
 	for cell in brush_cells:
@@ -142,10 +165,8 @@ func _draw_diagonal_indicator(overlay: Control, camera: Camera3D, terrain: Lands
 		overlay.draw_line(points[0], points[1], Color.ORANGE, 3.0)
 
 
-# Highlights the quarter of the cell around one corner
-func _draw_corner_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, data: TerrainData, cell: Vector2i, corner: int, color: Color, is_floor: bool) -> void:
-	var corners := data.get_floor_world_corners(cell.x, cell.y) if is_floor else data.get_top_world_corners(cell.x, cell.y)
-
+# Highlights one corner of a quad: the quarter of the quad nearest that corner plus a dot on it
+func _draw_corner_highlight(overlay: Control, camera: Camera3D, terrain: LandscapeTerrain, corners: Array[Vector3], corner: int, color: Color) -> void:
 	var corner_pos := corners[corner]
 	var prev_corner := corners[(corner + 3) % 4]
 	var next_corner := corners[(corner + 1) % 4]

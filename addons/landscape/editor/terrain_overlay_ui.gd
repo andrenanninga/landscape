@@ -155,7 +155,7 @@ func _setup_tool_buttons() -> void:
 	var tooltips: Dictionary = {
 		TerrainEditor.Tool.SCULPT: "Sculpt - Drag to raise/lower terrain",
 		TerrainEditor.Tool.PAINT: "Paint - Click to paint tiles",
-		TerrainEditor.Tool.COLOR: "Color - Paint vertex colors on corners",
+		TerrainEditor.Tool.COLOR: "Color - Paint vertex colors on corners and walls",
 		TerrainEditor.Tool.FLIP_DIAGONAL: "Flip - Toggle cell diagonal",
 		TerrainEditor.Tool.FLATTEN: "Flatten - Level terrain to height",
 		TerrainEditor.Tool.MOUNTAIN: "Mountain - Create hills and valleys",

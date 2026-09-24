@@ -4,7 +4,7 @@ Technical reference for the `addons/landscape` plugin (Godot 4.5+). For a user-f
 
 ## Overview
 
-`LandscapeTerrain` is a `MeshInstance3D` that renders a grid of cells described by a `TerrainData` resource. Every cell has four top corner heights, four floor corner heights, a tile per face, optional fences on its edges and per-corner vertex colors. Heights are stored as integer steps and multiplied by `height_step` at build time.
+`LandscapeTerrain` is a `MeshInstance3D` that renders a grid of cells described by a `TerrainData` resource. Every cell has four top corner heights, four floor corner heights, a tile per face, optional fences on its edges, per-corner vertex colors for the top and floor faces and per-vertex colors for its walls. Heights are stored as integer steps and multiplied by `height_step` at build time.
 
 The whole terrain is one `ArrayMesh`, rebuilt from scratch whenever `TerrainData` emits `data_changed`. Trimesh collision is kept in sync on an unowned child body. The mesh, material and collision body are derived data: they are rebuilt on load and excluded from the saved scene.
 
@@ -45,7 +45,7 @@ addons/landscape/
 
 ### Cell layout
 
-`TerrainData.cells` is a `PackedInt32Array` with `CELL_DATA_SIZE` (29) ints per cell, row-major (`(z * grid_width + x) * 29`):
+`TerrainData.cells` is a `PackedInt32Array` with `CELL_DATA_SIZE` (45) ints per cell, row-major (`(z * grid_width + x) * 45`):
 
 | Offset | Content |
 |---|---|
@@ -56,6 +56,9 @@ addons/landscape/
 | 17-20 | Packed fence tiles per edge |
 | 21-24 | Top vertex colors (RGBA32) |
 | 25-28 | Floor vertex colors (RGBA32) |
+| 29-44 | Wall vertex colors (RGBA32), 4 per edge N, E, S, W in `WallVertex` order: top-left, top-right, bottom-right, bottom-left as seen from outside |
+
+A wall vertex color of `0` (`INHERITED_VERTEX_COLOR`) means the vertex shows the top or floor corner color it touches; painted colors are forced opaque so they never pack to `0`. Data saved with the previous 29-int layout is upgraded on load by the `cells` setter.
 
 Invariants maintained by the tools: heights are never negative, the floor never exceeds the top, and edge-adjacent top corners differ by at most `max_slope_steps`.
 

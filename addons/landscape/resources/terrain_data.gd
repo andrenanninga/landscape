@@ -21,6 +21,9 @@ enum WallAlign { WORLD = 0, TOP = 1, BOTTOM = 2, STRETCH = 3 }
 # Edge indices used for walls and fences
 enum Edge { NORTH = 0, EAST = 1, SOUTH = 2, WEST = 3 }
 
+# Wall vertices as seen from outside the cell, in the order of get_surface_world_corners
+enum WallVertex { TOP_LEFT = 0, TOP_RIGHT = 1, BOTTOM_RIGHT = 2, BOTTOM_LEFT = 3 }
+
 # Per edge: [left corner, right corner] as seen from outside the cell, and the
 # corners of the neighbouring cell that coincide with them.
 const EDGE_CORNERS := [
@@ -45,7 +48,8 @@ const EDGE_NEIGHBOR_OFFSET := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), 
 #   17-20  packed fence tiles per edge
 #   21-24  top vertex colors (RGBA32)
 #   25-28  floor vertex colors (RGBA32)
-const CELL_DATA_SIZE := 29
+#   29-44  wall vertex colors (RGBA32), 4 per edge N, E, S, W in WallVertex order
+const CELL_DATA_SIZE := 45
 const TOP_OFFSET := 0
 const FLOOR_OFFSET := 4
 const TILE_OFFSET := 8
@@ -53,9 +57,18 @@ const FENCE_HEIGHT_OFFSET := 13
 const FENCE_TILE_OFFSET := 17
 const TOP_VERTEX_COLOR_OFFSET := 21
 const FLOOR_VERTEX_COLOR_OFFSET := 25
+const WALL_VERTEX_COLOR_OFFSET := 29
+const WALL_VERTEX_COUNT := 4
+
+# Scenes saved before wall vertex colors existed use this many ints per cell
+const LEGACY_CELL_DATA_SIZE := 29
 
 # Opaque white as a signed int32, which is how PackedInt32Array stores 0xFFFFFFFF
 const DEFAULT_VERTEX_COLOR := -1
+
+# A wall vertex without a colour of its own shows the top or floor corner colour it touches.
+# Painted colours are always opaque, so their packed value can never be zero.
+const INHERITED_VERTEX_COLOR := 0
 
 const TILE_INDEX_MASK := TilePacking.TILE_INDEX_MASK
 const ERASED_TILE_INDEX := 0xFFFF
@@ -104,7 +117,9 @@ var _batch_changed: bool = false
 	set(value):
 		max_slope_steps = maxi(1, value)
 
-@export var cells: PackedInt32Array = PackedInt32Array()
+@export var cells: PackedInt32Array = PackedInt32Array():
+	set(value):
+		cells = _upgrade_legacy_cells(value)
 
 
 func _init() -> void:
@@ -199,6 +214,22 @@ func resize_with_offset(new_width: int, new_depth: int, offset_x: int, offset_z:
 	_skip_resize = false
 	cells = remapped
 	data_changed.emit()
+
+
+# Appends the wall vertex colour slots to cell data saved with the previous layout
+func _upgrade_legacy_cells(data: PackedInt32Array) -> PackedInt32Array:
+	var cell_count := grid_width * grid_depth
+	if data.size() != cell_count * LEGACY_CELL_DATA_SIZE:
+		return data
+
+	var out := _blank_cells(grid_width, grid_depth)
+	for cell in cell_count:
+		var old_idx := cell * LEGACY_CELL_DATA_SIZE
+		var new_idx := cell * CELL_DATA_SIZE
+		for i in LEGACY_CELL_DATA_SIZE:
+			out[new_idx + i] = data[old_idx + i]
+
+	return out
 
 
 static func _blank_cells(width: int, depth: int) -> PackedInt32Array:
@@ -408,6 +439,76 @@ func set_floor_vertex_colors(x: int, z: int, colors: Array[int]) -> void:
 	if not is_valid_cell(x, z) or colors.size() != 4:
 		return
 	if _set_cell_values(_cell_index(x, z) + FLOOR_VERTEX_COLOR_OFFSET, colors):
+		_mark_changed()
+
+
+# ============================================================================
+# WALL VERTEX COLORS
+# ============================================================================
+
+# The cell corner a wall vertex sits on
+static func wall_vertex_corner(edge: int, vertex: int) -> int:
+	var side := 1 if vertex == WallVertex.TOP_RIGHT or vertex == WallVertex.BOTTOM_RIGHT else 0
+	return EDGE_CORNERS[edge][side]
+
+
+static func is_wall_vertex_top(vertex: int) -> bool:
+	return vertex == WallVertex.TOP_LEFT or vertex == WallVertex.TOP_RIGHT
+
+
+func _wall_color_index(x: int, z: int, edge: int, vertex: int) -> int:
+	return _cell_index(x, z) + WALL_VERTEX_COLOR_OFFSET + edge * WALL_VERTEX_COUNT + vertex
+
+
+func has_wall_vertex_color(x: int, z: int, edge: int, vertex: int) -> bool:
+	if not is_valid_cell(x, z):
+		return false
+	return cells[_wall_color_index(x, z, edge, vertex)] != INHERITED_VERTEX_COLOR
+
+
+# Falls back to the top or floor corner colour the vertex touches while it is unpainted
+func get_wall_vertex_color(x: int, z: int, edge: int, vertex: int) -> Color:
+	if not is_valid_cell(x, z):
+		return Color.WHITE
+
+	var packed := cells[_wall_color_index(x, z, edge, vertex)]
+	if packed != INHERITED_VERTEX_COLOR:
+		return unpack_vertex_color(packed)
+
+	var corner := wall_vertex_corner(edge, vertex)
+	if is_wall_vertex_top(vertex):
+		return get_top_vertex_color(x, z, corner)
+	return get_floor_vertex_color(x, z, corner)
+
+
+func set_wall_vertex_color(x: int, z: int, edge: int, vertex: int, color: Color) -> void:
+	if not is_valid_cell(x, z):
+		return
+
+	var opaque := Color(color.r, color.g, color.b, 1.0)
+	if _set_cell_value(_wall_color_index(x, z, edge, vertex), pack_vertex_color(opaque)):
+		_mark_changed()
+
+
+# Makes the vertex inherit its corner colour again
+func clear_wall_vertex_color(x: int, z: int, edge: int, vertex: int) -> void:
+	if not is_valid_cell(x, z):
+		return
+	if _set_cell_value(_wall_color_index(x, z, edge, vertex), INHERITED_VERTEX_COLOR):
+		_mark_changed()
+
+
+func get_wall_vertex_colors(x: int, z: int, edge: int) -> Array[int]:
+	if not is_valid_cell(x, z):
+		return [INHERITED_VERTEX_COLOR, INHERITED_VERTEX_COLOR, INHERITED_VERTEX_COLOR, INHERITED_VERTEX_COLOR]
+	var idx := _wall_color_index(x, z, edge, 0)
+	return [cells[idx], cells[idx + 1], cells[idx + 2], cells[idx + 3]]
+
+
+func set_wall_vertex_colors(x: int, z: int, edge: int, colors: Array[int]) -> void:
+	if not is_valid_cell(x, z) or colors.size() != WALL_VERTEX_COUNT:
+		return
+	if _set_cell_values(_wall_color_index(x, z, edge, 0), colors):
 		_mark_changed()
 
 

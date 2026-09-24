@@ -28,6 +28,7 @@ func build_mesh(terrain_data: TerrainData) -> ArrayMesh:
 	_terrain_data = terrain_data
 	_st = SurfaceTool.new()
 	_st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_st.set_smooth_group(-1)
 
 	for z in terrain_data.grid_depth:
 		for x in terrain_data.grid_width:
@@ -121,10 +122,10 @@ func _add_wall(x: int, z: int, edge: int, top: Array[Vector3], floor: Array[Vect
 	var right: int = TerrainData.EDGE_CORNERS[edge][1]
 	var surface_type := SURFACE_NORTH + edge
 
-	var vc_top_left := _terrain_data.get_top_vertex_color(x, z, left)
-	var vc_top_right := _terrain_data.get_top_vertex_color(x, z, right)
-	var vc_floor_left := _terrain_data.get_floor_vertex_color(x, z, left)
-	var vc_floor_right := _terrain_data.get_floor_vertex_color(x, z, right)
+	var vc_top_left := _terrain_data.get_wall_vertex_color(x, z, edge, TerrainData.WallVertex.TOP_LEFT)
+	var vc_top_right := _terrain_data.get_wall_vertex_color(x, z, edge, TerrainData.WallVertex.TOP_RIGHT)
+	var vc_floor_left := _terrain_data.get_wall_vertex_color(x, z, edge, TerrainData.WallVertex.BOTTOM_LEFT)
+	var vc_floor_right := _terrain_data.get_wall_vertex_color(x, z, edge, TerrainData.WallVertex.BOTTOM_RIGHT)
 
 	var bottom_left := floor[left]
 	var bottom_right := floor[right]

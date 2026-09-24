@@ -18,6 +18,7 @@
 11. **Smoothing tool** - Average heights between cells
 
 ## Recently Completed
+- [x] **Wall vertex colors** - Color tool paints walls: whole wall in cell mode, single vertex (top/bottom half by hit height) with a single-cell brush. Walls inherit top/floor corner colors until painted; erase restores inheritance. Cell layout grew from 29 to 45 ints with on-load migration.
 - [x] **Vertex color light mode** - Added light source mode to vertex color tool. Center of brush gets full intensity, edges fade with quadratic falloff. Selectable blend modes: Screen (soft lights), Additive (bright glows), Overlay (contrast-preserving), Multiply (shadows/darkening). Light mode disables erase mode.
 - [x] **Erase tool** - Toggle erase mode in paint panel to make faces invisible while keeping mesh geometry. Uses special tile index (65535) that shader discards.
 - [x] **Transparent tile support** - Added alpha blending to terrain shader. Tiles with transparency render correctly using `render_mode blend_mix, depth_prepass_alpha`.

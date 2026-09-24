@@ -136,10 +136,12 @@ A real-time shader preview shows exactly how the tile will look before you click
 
 ### Color
 
-Paint vertex colors onto terrain corners for lighting effects, shadows, and decoration.
+Paint vertex colors onto terrain corners and walls for lighting effects, shadows, and decoration.
 
-- **Color picker** — choose the color to paint; only the RGB channels tint the terrain.
-- **Erase** — remove color, resetting corners to white.
+- **Faces** — hover a top or floor face and click to color all four corners; with a single-cell brush, hover near a corner to color just that corner.
+- **Walls** — hover a wall and click to color the whole wall; with a single-cell brush, hover near a wall corner to color just that vertex. The upper half of the wall targets the top vertices, the lower half the bottom vertices. Larger brushes color the same wall of every cell under the brush. Unpainted walls take the colors of the top and floor corners they touch, so coloring a face still tints its walls until the wall gets a color of its own.
+- **Color picker** — choose the color to paint; only the RGB channels tint the terrain. Right-click any corner or wall vertex to pick its color.
+- **Erase** — remove color, resetting face corners to white and wall vertices to their inherited corner colors.
 - **Light mode** — paint with a radial falloff so the center of the brush receives full intensity and the edges fade off smoothly. Available blend modes:
   - **Screen** — soft lighting
   - **Additive** — bright glowing light
